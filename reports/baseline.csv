@@ -1,0 +1,4 @@
+metric_type,average_hits,hit_rate_1,hit_rate_2,hit_rate_3,hit_rate_4,hit_rate_5,data_path,train_draws,test_draws,train_span,test_span,train_end,test_size_param,eval_protocol,num_candidates,recent_window,decay,smoothing,seed,hit_thresholds
+baseline,0.67,0.48,0.17,0.02,0.0,0.0,data/processed/lotto_draws.csv,1110,100,"(1, 1110)","(1111, 1210)",,100,single_top6,100,,1.0,1.0,42,"1,2,3,4,5"
+random,0.7,0.57,0.12,0.01,0.0,0.0,data/processed/lotto_draws.csv,1110,100,"(1, 1110)","(1111, 1210)",,100,single_top6,100,,1.0,1.0,42,"1,2,3,4,5"
+improvement,-0.04285714285714274,-0.15789473684210523,0.4166666666666668,1.0,0.0,0.0,data/processed/lotto_draws.csv,1110,100,"(1, 1110)","(1111, 1210)",,100,single_top6,100,,1.0,1.0,42,"1,2,3,4,5"

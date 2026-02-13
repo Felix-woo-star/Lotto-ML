@@ -1,0 +1,82 @@
+{
+  "source": "data/processed/lotto_draws.csv",
+  "out_parquet": "data/features/lotto_features.parquet",
+  "windows": [
+    5,
+    10,
+    20,
+    50,
+    100
+  ],
+  "ewm_rates": [
+    0.9,
+    0.95
+  ],
+  "cooc_windows": [
+    20,
+    50
+  ],
+  "min_history": 100,
+  "stats": {
+    "total_draws": 1210,
+    "rows": 49950,
+    "min_history": 100,
+    "windows": [
+      5,
+      10,
+      20,
+      50,
+      100
+    ],
+    "ewm_rates": [
+      0.9,
+      0.95
+    ],
+    "cooc_windows": [
+      20,
+      50
+    ],
+    "trend_pairs": [
+      [
+        10,
+        50
+      ],
+      [
+        20,
+        100
+      ]
+    ],
+    "rate_diff_pairs": [
+      [
+        5,
+        20
+      ],
+      [
+        10,
+        50
+      ]
+    ],
+    "feature_groups": {
+      "number": [
+        "number_bucket",
+        "number_is_odd",
+        "number_is_high",
+        "number_mod_10"
+      ],
+      "recency": [
+        "last_seen_gap",
+        "bonus_last_seen_gap",
+        "recency_inv"
+      ],
+      "context": [
+        "prev_draw_sum",
+        "prev_draw_odd_count",
+        "prev_draw_high_count",
+        "is_prev_draw_number",
+        "is_prev_bonus_number",
+        "adjacent_prev_count",
+        "distance_to_prev_min"
+      ]
+    }
+  }
+}

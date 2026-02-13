@@ -1,0 +1,197 @@
+{
+  "config": {
+    "data_path": "data/features/lotto_features.parquet",
+    "models_requested": [
+      "logreg",
+      "randomforest",
+      "lightgbm"
+    ],
+    "models_used": [
+      "logreg",
+      "randomforest",
+      "lightgbm"
+    ],
+    "hit_thresholds": [
+      3,
+      4,
+      5
+    ],
+    "min_train_draws": 1000,
+    "fold_test_size": 20,
+    "fold_step_size": 20,
+    "max_folds": 2,
+    "feature_count": 22
+  },
+  "unavailable_models": {},
+  "folds": [
+    {
+      "fold": 1,
+      "train_span": [
+        101,
+        1160
+      ],
+      "test_span": [
+        1161,
+        1180
+      ],
+      "metrics": {
+        "logreg": {
+          "average_hits": 0.85,
+          "hit_rates": {
+            "3": 0.0,
+            "4": 0.0,
+            "5": 0.0
+          },
+          "draws": 20
+        },
+        "randomforest": {
+          "average_hits": 0.6,
+          "hit_rates": {
+            "3": 0.0,
+            "4": 0.0,
+            "5": 0.0
+          },
+          "draws": 20
+        },
+        "lightgbm": {
+          "average_hits": 0.65,
+          "hit_rates": {
+            "3": 0.0,
+            "4": 0.0,
+            "5": 0.0
+          },
+          "draws": 20
+        }
+      }
+    },
+    {
+      "fold": 2,
+      "train_span": [
+        101,
+        1180
+      ],
+      "test_span": [
+        1181,
+        1200
+      ],
+      "metrics": {
+        "logreg": {
+          "average_hits": 0.65,
+          "hit_rates": {
+            "3": 0.0,
+            "4": 0.0,
+            "5": 0.0
+          },
+          "draws": 20
+        },
+        "randomforest": {
+          "average_hits": 1.2,
+          "hit_rates": {
+            "3": 0.05,
+            "4": 0.0,
+            "5": 0.0
+          },
+          "draws": 20
+        },
+        "lightgbm": {
+          "average_hits": 1.2,
+          "hit_rates": {
+            "3": 0.1,
+            "4": 0.0,
+            "5": 0.0
+          },
+          "draws": 20
+        }
+      }
+    }
+  ],
+  "summary": {
+    "logreg": {
+      "folds": 2,
+      "average_hits": {
+        "mean": 0.75,
+        "std": 0.09999999999999998,
+        "min": 0.65,
+        "max": 0.85
+      },
+      "hit_rates": {
+        "3": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "4": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "5": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        }
+      }
+    },
+    "randomforest": {
+      "folds": 2,
+      "average_hits": {
+        "mean": 0.8999999999999999,
+        "std": 0.3,
+        "min": 0.6,
+        "max": 1.2
+      },
+      "hit_rates": {
+        "3": {
+          "mean": 0.025,
+          "std": 0.025,
+          "min": 0.0,
+          "max": 0.05
+        },
+        "4": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "5": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        }
+      }
+    },
+    "lightgbm": {
+      "folds": 2,
+      "average_hits": {
+        "mean": 0.925,
+        "std": 0.27499999999999997,
+        "min": 0.65,
+        "max": 1.2
+      },
+      "hit_rates": {
+        "3": {
+          "mean": 0.05,
+          "std": 0.05,
+          "min": 0.0,
+          "max": 0.1
+        },
+        "4": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        },
+        "5": {
+          "mean": 0.0,
+          "std": 0.0,
+          "min": 0.0,
+          "max": 0.0
+        }
+      }
+    }
+  }
+}

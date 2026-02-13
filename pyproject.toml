@@ -1,0 +1,19 @@
+[project]
+name = "lotto-ml"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pandas>=2.2.0",
+    "playwright>=1.49.0",
+    "pyarrow>=22.0.0",
+    "scikit-learn>=1.5.0",
+]
+
+[project.optional-dependencies]
+advanced-models = [
+    "lightgbm>=4.6.0",
+    "xgboost>=2.1.0",
+    "catboost>=1.2.8; python_version < '3.14'",
+]

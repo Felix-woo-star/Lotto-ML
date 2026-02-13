@@ -1,0 +1,58 @@
+{
+  "config": {
+    "data_path": "data/processed/lotto_draws.csv",
+    "train_draws": 1110,
+    "test_draws": 100,
+    "train_span": [
+      1,
+      1110
+    ],
+    "test_span": [
+      1111,
+      1210
+    ],
+    "train_end": "",
+    "test_size_param": 100,
+    "eval_protocol": "single_top6",
+    "num_candidates": 100,
+    "recent_window": "",
+    "decay": 1.0,
+    "smoothing": 1.0,
+    "seed": 42,
+    "hit_thresholds": "1,2,3,4,5"
+  },
+  "metrics": {
+    "baseline": {
+      "average_hits": 0.67,
+      "hit_rates": {
+        "1": 0.48,
+        "2": 0.17,
+        "3": 0.02,
+        "4": 0.0,
+        "5": 0.0
+      },
+      "draws": 100
+    },
+    "random": {
+      "average_hits": 0.7,
+      "hit_rates": {
+        "1": 0.57,
+        "2": 0.12,
+        "3": 0.01,
+        "4": 0.0,
+        "5": 0.0
+      },
+      "draws": 100
+    },
+    "improvement": {
+      "average_hits": -0.04285714285714274,
+      "hit_rates": {
+        "1": -0.15789473684210523,
+        "2": 0.4166666666666668,
+        "3": 1.0,
+        "4": 0.0,
+        "5": 0.0
+      }
+    }
+  }
+}

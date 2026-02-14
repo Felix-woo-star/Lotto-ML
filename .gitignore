@@ -1,14 +1,42 @@
-# Python-generated files
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Python cache / build
 __pycache__/
 *.py[oc]
+*.pyd
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Virtual environments
-.venv
+.venv/
+.env
 
-data/
+# Jupyter
+.ipynb_checkpoints/
 
-reports/
+# Generated artifacts
+models/
+reports/*.json
+reports/*.csv
+reports/*.md
+
+# Generated data files
+data/raw/*.csv
+data/processed/*.csv
+data/features/*.parquet
+data/features/*.json
+
+# Keep folder placeholders
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/features/.gitkeep

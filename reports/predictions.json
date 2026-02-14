@@ -23,11 +23,11 @@
     },
     {
       "number": 21,
-      "probability": 0.31898281433869996
+      "probability": 0.31898281433869985
     },
     {
       "number": 41,
-      "probability": 0.3113806244980736
+      "probability": 0.31138062449807363
     },
     {
       "number": 9,
@@ -53,13 +53,13 @@
     },
     {
       "number": 21,
-      "probability": 0.31898281433869996,
+      "probability": 0.31898281433869985,
       "rank": 3,
       "is_top_k": true
     },
     {
       "number": 41,
-      "probability": 0.3113806244980736,
+      "probability": 0.31138062449807363,
       "rank": 4,
       "is_top_k": true
     },
@@ -95,7 +95,7 @@
     },
     {
       "number": 18,
-      "probability": 0.3022904334133574,
+      "probability": 0.30229043341335743,
       "rank": 10,
       "is_top_k": false
     },
@@ -125,7 +125,7 @@
     },
     {
       "number": 19,
-      "probability": 0.2961778334916479,
+      "probability": 0.2961778334916478,
       "rank": 15,
       "is_top_k": false
     },
@@ -137,7 +137,7 @@
     },
     {
       "number": 6,
-      "probability": 0.2949999252880735,
+      "probability": 0.2949999252880736,
       "rank": 17,
       "is_top_k": false
     },
@@ -161,7 +161,7 @@
     },
     {
       "number": 22,
-      "probability": 0.2918223897067911,
+      "probability": 0.29182238970679114,
       "rank": 21,
       "is_top_k": false
     },
@@ -197,13 +197,13 @@
     },
     {
       "number": 10,
-      "probability": 0.2886305359281584,
+      "probability": 0.2886305359281585,
       "rank": 27,
       "is_top_k": false
     },
     {
       "number": 14,
-      "probability": 0.28827885699422395,
+      "probability": 0.288278856994224,
       "rank": 28,
       "is_top_k": false
     },
@@ -227,19 +227,19 @@
     },
     {
       "number": 23,
-      "probability": 0.28396727302872266,
+      "probability": 0.2839672730287227,
       "rank": 32,
       "is_top_k": false
     },
     {
       "number": 28,
-      "probability": 0.2837510799417296,
+      "probability": 0.28375107994172954,
       "rank": 33,
       "is_top_k": false
     },
     {
       "number": 2,
-      "probability": 0.28306195791142047,
+      "probability": 0.2830619579114205,
       "rank": 34,
       "is_top_k": false
     },
@@ -281,7 +281,7 @@
     },
     {
       "number": 29,
-      "probability": 0.27551569493022937,
+      "probability": 0.2755156949302293,
       "rank": 41,
       "is_top_k": false
     },

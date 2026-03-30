@@ -103,6 +103,12 @@ def hit_rate(metrics: dict, threshold: int) -> float:
     return float(value)
 
 
+def portfolio_value(metrics: dict, key: str) -> float:
+    """포트폴리오 메트릭 값을 읽는다."""
+    portfolio = metrics.get("portfolio", {})
+    return float(portfolio.get(key, 0.0))
+
+
 def to_markdown_table(headers: list[str], rows: list[list[str]]) -> str:
     """헤더/행 데이터를 마크다운 테이블 문자열로 변환한다."""
     lines = ["| " + " | ".join(headers) + " |"]
@@ -143,6 +149,9 @@ def composite_score(metrics: dict, thresholds: list[int]) -> float:
     score -= metric_value(metrics, "brier") * 0.10
     score -= metric_value(metrics, "log_loss") * 0.05
     score -= metric_value(metrics, "ece") * 0.10
+    if "portfolio" in metrics:
+        score += portfolio_value(metrics, "average_best_hits") * 0.25
+        score += portfolio_value(metrics, "roi") * 0.02
     return score
 
 
@@ -249,6 +258,12 @@ def main() -> int:
                 parts.append(f"{display_name} {metric_value(metrics, key):.6f}")
             else:
                 parts.append(f"{display_name} 미제공")
+        if "portfolio" in metrics:
+            parts.append(f"포트폴리오 최대일치 {portfolio_value(metrics, 'average_best_hits'):.4f}")
+            parts.append(f"포트폴리오 예상수익 {portfolio_value(metrics, 'expected_profit'):.2f}")
+            parts.append(f"포트폴리오 ROI {portfolio_value(metrics, 'roi'):.6f}")
+        else:
+            parts.append("포트폴리오 지표 미제공")
         parts.append(f"종합점수 {composite_score(metrics, thresholds):.4f}")
         summary_lines.append(f"- {label}: " + ", ".join(parts))
 
@@ -272,12 +287,19 @@ def main() -> int:
                 row.append(f"{metric_value(metrics, key):.6f}")
             else:
                 row.append("N/A")
+        if "portfolio" in metrics:
+            row.append(f"{portfolio_value(metrics, 'average_best_hits'):.4f}")
+            row.append(f"{portfolio_value(metrics, 'expected_profit'):.2f}")
+            row.append(f"{portfolio_value(metrics, 'roi'):.6f}")
+        else:
+            row.extend(["N/A", "N/A", "N/A"])
         ranking_rows.append(row)
 
     ranking_headers = (
         ["순위", "모델", "종합점수", "평균 일치 개수"]
         + [f"Hit@{t}" for t in thresholds]
         + [display for _, display, _ in ADVANCED_METRICS]
+        + ["포트폴리오 최대일치", "포트폴리오 예상수익", "포트폴리오 ROI"]
     )
 
     best_model_line = ""
@@ -319,6 +341,41 @@ def main() -> int:
             "",
         ]
     )
+    portfolio_rows = []
+    for label, metrics in [
+        ("베이스라인", baseline_metrics),
+        ("랜덤", random_metrics),
+        *model_rows,
+    ]:
+        if "portfolio" not in metrics:
+            continue
+        portfolio = metrics["portfolio"]
+        portfolio_rows.append(
+            [
+                label,
+                f"{float(portfolio.get('average_best_hits', 0.0)):.4f}",
+                f"{float(portfolio.get('average_unique_numbers', 0.0)):.4f}",
+                f"{float(portfolio.get('expected_profit', 0.0)):.2f}",
+                f"{float(portfolio.get('roi', 0.0)):.6f}",
+            ]
+        )
+    if portfolio_rows:
+        report.extend(
+            [
+                "## 포트폴리오 비교",
+                to_markdown_table(
+                    [
+                        "구분",
+                        "최대 일치 기대값",
+                        "평균 고유번호 수",
+                        "예상 수익",
+                        "ROI",
+                    ],
+                    portfolio_rows,
+                ),
+                "",
+            ]
+        )
 
     ensure_parent_dir(args.out_md)
     with open(args.out_md, "w", encoding="utf-8") as handle:

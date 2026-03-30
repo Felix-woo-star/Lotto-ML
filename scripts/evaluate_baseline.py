@@ -7,6 +7,7 @@ import math
 import os
 import random
 from dataclasses import dataclass
+import lotto_portfolio as lp
 
 NUMBER_MIN = 1
 NUMBER_MAX = 45
@@ -16,6 +17,8 @@ NUMBER_MAX = 45
 class Draw:
     draw_no: int
     numbers: tuple[int, int, int, int, int, int]
+    bonus: int
+    first_prize_amount: float
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,11 +49,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--eval-protocol",
-        choices=["single_top6", "max_of_candidates"],
+        choices=["single_top6", "max_of_candidates", "portfolio"],
         default="single_top6",
         help=(
             "평가 방식. single_top6: 회차당 추천 1세트(모델과 동일 기준), "
-            "max_of_candidates: K개 중 최대 적중."
+            "max_of_candidates: K개 중 최대 적중, portfolio: "
+            "후보 조합 생성 후 중복 최소화 포트폴리오 평가."
         ),
     )
     parser.add_argument(
@@ -82,6 +86,21 @@ def parse_args() -> argparse.Namespace:
         default=42,
         help="난수 시드.",
     )
+    parser.add_argument("--portfolio-size", type=int, default=12)
+    parser.add_argument("--candidate-pool-size", type=int, default=18)
+    parser.add_argument("--sampling-temperature", type=float, default=0.9)
+    parser.add_argument("--overlap-penalty", type=float, default=0.18)
+    parser.add_argument("--unique-bonus", type=float, default=0.035)
+    parser.add_argument("--ticket-price", type=float, default=lp.DEFAULT_TICKET_PRICE)
+    parser.add_argument(
+        "--tier1-payout-estimate",
+        type=float,
+        default=lp.DEFAULT_TIER1_ESTIMATE,
+    )
+    parser.add_argument("--tier2-payout", type=float, default=lp.DEFAULT_TIER_PAYOUTS[2])
+    parser.add_argument("--tier3-payout", type=float, default=lp.DEFAULT_TIER_PAYOUTS[3])
+    parser.add_argument("--tier4-payout", type=float, default=lp.DEFAULT_TIER_PAYOUTS[4])
+    parser.add_argument("--tier5-payout", type=float, default=lp.DEFAULT_TIER_PAYOUTS[5])
     parser.add_argument(
         "--out-json",
         default=None,
@@ -102,7 +121,14 @@ def load_draws(path: str) -> list[Draw]:
         reader = csv.DictReader(handle)
         for row in reader:
             numbers = tuple(int(row[f"n{i}"]) for i in range(1, 7))
-            draws.append(Draw(draw_no=int(row["draw_no"]), numbers=numbers))
+            draws.append(
+                Draw(
+                    draw_no=int(row["draw_no"]),
+                    numbers=numbers,
+                    bonus=int(row.get("bonus", 0) or 0),
+                    first_prize_amount=float(row.get("first_prize_amount", 0) or 0),
+                )
+            )
     return draws
 
 
@@ -292,7 +318,92 @@ def metrics_to_flat(metrics: dict, thresholds: list[int]) -> dict:
     flattened = {"average_hits": metrics["average_hits"]}
     for threshold in thresholds:
         flattened[f"hit_rate_{threshold}"] = metrics["hit_rates"][threshold]
+    portfolio = metrics.get("portfolio")
+    if portfolio:
+        flattened["portfolio_average_best_hits"] = portfolio["average_best_hits"]
+        flattened["portfolio_expected_payout"] = portfolio["expected_payout"]
+        flattened["portfolio_expected_profit"] = portfolio["expected_profit"]
+        flattened["portfolio_roi"] = portfolio["roi"]
     return flattened
+
+
+def build_prize_config(args: argparse.Namespace) -> dict:
+    """포트폴리오 수익 평가 설정을 만든다."""
+    return {
+        "ticket_price": float(args.ticket_price),
+        "tier1_estimate": float(args.tier1_payout_estimate),
+        "tier_payouts": {
+            2: float(args.tier2_payout),
+            3: float(args.tier3_payout),
+            4: float(args.tier4_payout),
+            5: float(args.tier5_payout),
+        },
+    }
+
+
+def normalize_weights(weights: list[float]) -> dict[int, float]:
+    """가중치 리스트를 번호별 확률 맵으로 정규화한다."""
+    total = float(sum(max(weight, 0.0) for weight in weights))
+    if total <= 0:
+        total = float(len(weights))
+        weights = [1.0 for _ in weights]
+    return {
+        number: max(float(weights[number - NUMBER_MIN]), 0.0) / total
+        for number in range(NUMBER_MIN, NUMBER_MAX + 1)
+    }
+
+
+def evaluate_portfolio_protocol(
+    test_draws: list[Draw],
+    weights: list[float],
+    thresholds: list[int],
+    *,
+    args: argparse.Namespace,
+) -> dict:
+    """다중 후보 -> 포트폴리오 -> 수익 평가 프로토콜을 수행한다."""
+    probability_by_number = normalize_weights(weights)
+    prize_config = build_prize_config(args)
+    results = []
+
+    for draw in test_draws:
+        bundle = lp.build_portfolio(
+            probability_by_number,
+            num_candidates=args.num_candidates,
+            portfolio_size=args.portfolio_size,
+            top_pool_size=args.candidate_pool_size,
+            temperature=args.sampling_temperature,
+            overlap_penalty=args.overlap_penalty,
+            unique_bonus=args.unique_bonus,
+            seed=args.seed + draw.draw_no,
+        )
+        result = lp.evaluate_portfolio(
+            bundle["portfolio"],
+            draw.numbers,
+            draw.bonus,
+            draw_context={"first_prize_amount": draw.first_prize_amount},
+            tier_payouts=prize_config["tier_payouts"],
+            ticket_price=prize_config["ticket_price"],
+            tier1_estimate=prize_config["tier1_estimate"],
+        )
+        results.append(result)
+
+    portfolio_metrics = lp.summarize_portfolio_results(results, thresholds)
+    portfolio_metrics["config"] = {
+        "num_candidates": args.num_candidates,
+        "portfolio_size": args.portfolio_size,
+        "candidate_pool_size": args.candidate_pool_size,
+        "sampling_temperature": args.sampling_temperature,
+        "overlap_penalty": args.overlap_penalty,
+        "unique_bonus": args.unique_bonus,
+        "seed": args.seed,
+    }
+    portfolio_metrics["prize_config"] = prize_config
+    return {
+        "average_hits": portfolio_metrics["average_best_hits"],
+        "hit_rates": portfolio_metrics["best_hit_rates"],
+        "draws": portfolio_metrics["draws"],
+        "portfolio": portfolio_metrics,
+    }
 
 
 def build_config(
@@ -319,6 +430,11 @@ def build_config(
         "smoothing": args.smoothing,
         "seed": args.seed,
         "hit_thresholds": ",".join(str(value) for value in thresholds),
+        "portfolio_size": args.portfolio_size,
+        "candidate_pool_size": args.candidate_pool_size,
+        "sampling_temperature": args.sampling_temperature,
+        "overlap_penalty": args.overlap_penalty,
+        "unique_bonus": args.unique_bonus,
     }
 
 
@@ -364,6 +480,16 @@ def main() -> int:
         random_baseline = evaluate_single_top6(
             test, uniform_weights, thresholds, random_pick=True, seed=args.seed + 1
         )
+    elif args.eval_protocol == "portfolio":
+        baseline = evaluate_portfolio_protocol(test, weights, thresholds, args=args)
+        random_args = argparse.Namespace(**vars(args))
+        random_args.seed = args.seed + 1
+        random_baseline = evaluate_portfolio_protocol(
+            test,
+            uniform_weights,
+            thresholds,
+            args=random_args,
+        )
     else:
         baseline = evaluate_max_of_candidates(
             test, weights, args.num_candidates, thresholds, seed=args.seed
@@ -387,11 +513,17 @@ def main() -> int:
     print(f"- average_hits: {baseline['average_hits']:.4f}")
     for threshold in thresholds:
         print(f"- hit_rate_{threshold}: {baseline['hit_rates'][threshold]:.4f}")
+    if "portfolio" in baseline:
+        print(f"- expected_profit: {baseline['portfolio']['expected_profit']:.2f}")
+        print(f"- roi: {baseline['portfolio']['roi']:.6f}")
 
     print("Random baseline")
     print(f"- average_hits: {random_baseline['average_hits']:.4f}")
     for threshold in thresholds:
         print(f"- hit_rate_{threshold}: {random_baseline['hit_rates'][threshold]:.4f}")
+    if "portfolio" in random_baseline:
+        print(f"- expected_profit: {random_baseline['portfolio']['expected_profit']:.2f}")
+        print(f"- roi: {random_baseline['portfolio']['roi']:.6f}")
 
     print("Improvement vs random")
     print(

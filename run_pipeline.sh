@@ -13,6 +13,12 @@ BASELINE_PROTOCOL="single_top6"
 FETCH_ENGINE="playwright"
 # catboost는 Python 3.14 환경에서 설치 호환 이슈가 있어 기본 목록에서 제외한다.
 MODEL_LIST="logreg,gbdt,randomforest,extratrees,mlp,lightgbm,xgboost"
+NUM_CANDIDATES=256
+PORTFOLIO_SIZE=12
+CANDIDATE_POOL_SIZE=18
+SAMPLING_TEMPERATURE=0.9
+OVERLAP_PENALTY=0.18
+UNIQUE_BONUS=0.035
 
 ROLLING_MIN_TRAIN_DRAWS=600
 ROLLING_FOLD_TEST_SIZE=40
@@ -39,8 +45,14 @@ Options:
   --fetch-engine <engine>           수집 엔진: playwright|urllib (기본값: playwright).
   --test-size <n>                   평가 테스트 회차 수 (기본값: 100).
   --train-end <draw_no>             학습 종료 회차(지정 시 --test-size 무시).
-  --baseline-protocol <mode>        baseline 평가 방식: single_top6|max_of_candidates
+  --baseline-protocol <mode>        baseline 평가 방식: single_top6|max_of_candidates|portfolio
   --models <csv>                    학습/검증 모델 목록(쉼표 구분).
+  --num-candidates <n>              회차당 생성할 후보 조합 수.
+  --portfolio-size <n>              최종 포트폴리오 티켓 수.
+  --candidate-pool-size <n>         후보 생성 시 샘플링에 사용할 상위 번호 풀 크기.
+  --sampling-temperature <v>        후보 생성 temperature.
+  --overlap-penalty <v>             포트폴리오 중복 패널티.
+  --unique-bonus <v>                포트폴리오 고유번호 보너스.
   --rolling-min-train-draws <n>     롤링 검증 최소 학습 회차 수.
   --rolling-fold-test-size <n>      롤링 검증 폴드별 테스트 회차 수.
   --rolling-fold-step-size <n>      롤링 검증 폴드 간 이동 간격.
@@ -88,6 +100,30 @@ while [[ $# -gt 0 ]]; do
       ;;
     --models)
       MODEL_LIST="${2:-}"
+      shift 2
+      ;;
+    --num-candidates)
+      NUM_CANDIDATES="${2:-}"
+      shift 2
+      ;;
+    --portfolio-size)
+      PORTFOLIO_SIZE="${2:-}"
+      shift 2
+      ;;
+    --candidate-pool-size)
+      CANDIDATE_POOL_SIZE="${2:-}"
+      shift 2
+      ;;
+    --sampling-temperature)
+      SAMPLING_TEMPERATURE="${2:-}"
+      shift 2
+      ;;
+    --overlap-penalty)
+      OVERLAP_PENALTY="${2:-}"
+      shift 2
+      ;;
+    --unique-bonus)
+      UNIQUE_BONUS="${2:-}"
       shift 2
       ;;
     --rolling-min-train-draws)
@@ -146,7 +182,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$BASELINE_PROTOCOL" != "single_top6" && "$BASELINE_PROTOCOL" != "max_of_candidates" ]]; then
+if [[ "$BASELINE_PROTOCOL" != "single_top6" && "$BASELINE_PROTOCOL" != "max_of_candidates" && "$BASELINE_PROTOCOL" != "portfolio" ]]; then
   echo "Invalid --baseline-protocol: $BASELINE_PROTOCOL" >&2
   exit 1
 fi
@@ -248,6 +284,12 @@ run_step "베이스라인 평가 (evaluate_baseline)" \
   "${PYTHON_RUN[@]}" scripts/evaluate_baseline.py \
   "${SPLIT_ARGS[@]}" \
   --eval-protocol "$BASELINE_PROTOCOL" \
+  --num-candidates "$NUM_CANDIDATES" \
+  --portfolio-size "$PORTFOLIO_SIZE" \
+  --candidate-pool-size "$CANDIDATE_POOL_SIZE" \
+  --sampling-temperature "$SAMPLING_TEMPERATURE" \
+  --overlap-penalty "$OVERLAP_PENALTY" \
+  --unique-bonus "$UNIQUE_BONUS" \
   --out-json reports/baseline.json \
   --out-csv reports/baseline.csv
 
@@ -275,6 +317,12 @@ for model in "${REQUESTED_MODELS[@]}"; do
       --max-depth "$LGBM_MAX_DEPTH" \
       --min-data-in-leaf "$LGBM_MIN_DATA_IN_LEAF" \
       --calibration-bins "$CALIBRATION_BINS" \
+      --num-candidates "$NUM_CANDIDATES" \
+      --portfolio-size "$PORTFOLIO_SIZE" \
+      --candidate-pool-size "$CANDIDATE_POOL_SIZE" \
+      --sampling-temperature "$SAMPLING_TEMPERATURE" \
+      --overlap-penalty "$OVERLAP_PENALTY" \
+      --unique-bonus "$UNIQUE_BONUS" \
       --model "$model" \
       --out-json "$out_json" \
       --out-csv "$out_csv" \
@@ -283,6 +331,12 @@ for model in "${REQUESTED_MODELS[@]}"; do
     "${PYTHON_RUN[@]}" scripts/train_model.py \
       "${SPLIT_ARGS[@]}" \
       --calibration-bins "$CALIBRATION_BINS" \
+      --num-candidates "$NUM_CANDIDATES" \
+      --portfolio-size "$PORTFOLIO_SIZE" \
+      --candidate-pool-size "$CANDIDATE_POOL_SIZE" \
+      --sampling-temperature "$SAMPLING_TEMPERATURE" \
+      --overlap-penalty "$OVERLAP_PENALTY" \
+      --unique-bonus "$UNIQUE_BONUS" \
       --model "$model" \
       --out-json "$out_json" \
       --out-csv "$out_csv" \
@@ -323,6 +377,12 @@ run_step "롤링 검증 (rolling_validate)" \
   --fold-step-size "$ROLLING_FOLD_STEP_SIZE" \
   --max-folds "$ROLLING_MAX_FOLDS" \
   --calibration-bins "$CALIBRATION_BINS" \
+  --num-candidates "$NUM_CANDIDATES" \
+  --portfolio-size "$PORTFOLIO_SIZE" \
+  --candidate-pool-size "$CANDIDATE_POOL_SIZE" \
+  --sampling-temperature "$SAMPLING_TEMPERATURE" \
+  --overlap-penalty "$OVERLAP_PENALTY" \
+  --unique-bonus "$UNIQUE_BONUS" \
   --lgbm-n-estimators "$LGBM_N_ESTIMATORS" \
   --num-leaves "$LGBM_NUM_LEAVES" \
   --lgbm-max-depth "$LGBM_MAX_DEPTH" \
@@ -333,12 +393,19 @@ run_step "롤링 검증 (rolling_validate)" \
 run_step "다음 회차 예측 (predict_next)" \
   "${PYTHON_RUN[@]}" scripts/predict_next.py \
   --model-paths "$MODEL_PATH_ARG" \
+  --num-candidates "$NUM_CANDIDATES" \
+  --portfolio-size "$PORTFOLIO_SIZE" \
+  --candidate-pool-size "$CANDIDATE_POOL_SIZE" \
+  --sampling-temperature "$SAMPLING_TEMPERATURE" \
+  --overlap-penalty "$OVERLAP_PENALTY" \
+  --unique-bonus "$UNIQUE_BONUS" \
   --out-json reports/predictions.json \
-  --out-csv reports/predictions.csv
+  --out-csv reports/predictions.csv \
+  --out-portfolio-csv reports/prediction_portfolio.csv
 
 echo
 if [[ ${#FAILED_MODELS[@]} -gt 0 ]]; then
   echo "제외된 모델: $(join_by_comma "${FAILED_MODELS[@]}")"
 fi
 echo "사용된 모델: $(join_by_comma "${SUCCESS_MODELS[@]}")"
-echo "완료: reports/compare.md, reports/rolling_validation.md, reports/predictions.json, reports/predictions.csv"
+echo "완료: reports/compare.md, reports/rolling_validation.md, reports/predictions.json, reports/predictions.csv, reports/prediction_portfolio.csv"

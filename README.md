@@ -65,12 +65,24 @@ python scripts/evaluate_baseline.py
 
 옵션:
 - `--test-size`: 테스트에 사용할 회차 수 (기본값: 100)
-- `--eval-protocol`: 평가 방식 (`single_top6` 또는 `max_of_candidates`, 기본값: `single_top6`)
-- `--num-candidates`: 회차당 추천 조합 개수 (`max_of_candidates`에서 사용, 기본값: 100)
+- `--eval-protocol`: 평가 방식 (`single_top6`, `max_of_candidates`, `portfolio`, 기본값: `single_top6`)
+- `--num-candidates`: 회차당 생성할 후보 조합 수 (`max_of_candidates`/`portfolio`에서 사용)
+- `--portfolio-size`: 최종 포트폴리오 티켓 수 (`portfolio`에서 사용)
+- `--candidate-pool-size`: 후보 생성 시 샘플링에 사용할 상위 번호 풀 크기
+- `--sampling-temperature`: 후보 생성 temperature
+- `--overlap-penalty`: 포트폴리오 중복 패널티
+- `--unique-bonus`: 포트폴리오 고유번호 보너스
+- `--ticket-price`, `--tier2-payout`, `--tier3-payout`, `--tier4-payout`, `--tier5-payout`: 등수별 기대 수익 평가 파라미터
 - `--recent-window`: 최근 N회차만 사용해 빈도 가중치 계산
 - `--hit-thresholds`: 적중 기준 (기본값: `1,2,3,4,5`)
 - `--out-json`: 메트릭을 JSON으로 저장
 - `--out-csv`: 메트릭을 CSV로 저장
+
+포트폴리오 평가 예시:
+
+```bash
+python scripts/evaluate_baseline.py --eval-protocol portfolio --num-candidates 256 --portfolio-size 12
+```
 
 ### 피처 데이터셋 생성
 
@@ -104,6 +116,11 @@ python scripts/train_model.py
 - `--test-size`: 테스트에 사용할 회차 수 (기본값: 100)
 - `--hit-thresholds`: 적중 기준 (기본값: `1,2,3,4,5`)
 - `--calibration-bins`: ECE 계산 bin 수 (기본값: 10)
+- `--num-candidates`: 회차당 생성할 후보 조합 수
+- `--portfolio-size`: 최종 포트폴리오 티켓 수
+- `--candidate-pool-size`, `--sampling-temperature`: 후보 생성 설정
+- `--overlap-penalty`, `--unique-bonus`: 중복 최소화 포트폴리오 설정
+- `--ticket-price`, `--tier2-payout`, `--tier3-payout`, `--tier4-payout`, `--tier5-payout`: 등수별 기대 수익 평가 설정
 - `--out-model`: 모델 저장 경로 (pickle)
 - `--out-json`: 메트릭을 JSON으로 저장
 - `--out-csv`: 메트릭을 CSV로 저장
@@ -125,6 +142,16 @@ python scripts/train_model.py
 - `LogLoss`
 - `ECE`
 
+포트폴리오 백테스트 추가 지표:
+- `portfolio.average_best_hits`
+- `portfolio.best_hit_rates`
+- `portfolio.average_unique_numbers`
+- `portfolio.average_pairwise_overlap`
+- `portfolio.expected_payout`
+- `portfolio.expected_profit`
+- `portfolio.roi`
+- `portfolio.expected_payout_by_tier`
+
 ### 다음 회차 예측
 
 ```bash
@@ -134,8 +161,14 @@ python scripts/predict_next.py --model-path models/logreg.pkl
 앙상블 예측 + 결과 저장:
 
 ```bash
-python scripts/predict_next.py --model-paths models/logreg.pkl,models/gbdt.pkl --out-json reports/predictions.json --out-csv reports/predictions.csv
+python scripts/predict_next.py --model-paths models/logreg.pkl,models/gbdt.pkl --num-candidates 256 --portfolio-size 12 --out-json reports/predictions.json --out-csv reports/predictions.csv --out-portfolio-csv reports/prediction_portfolio.csv
 ```
+
+`predict_next.py` 출력:
+- 번호별 확률 랭킹 (`predictions.json`, `predictions.csv`)
+- 후보 조합 수와 포트폴리오 설정
+- 최종 포트폴리오 티켓 목록
+- 포트폴리오 고유 번호 수 / 평균 겹침도
 
 ### 메트릭 비교 리포트
 
@@ -161,6 +194,8 @@ python scripts/rolling_validate.py --models logreg,gbdt,randomforest,extratrees,
 - `--fold-step-size`: 폴드 간 이동 간격
 - `--max-folds`: 최근 기준 최대 폴드 수
 - `--calibration-bins`: ECE 계산 bin 수
+- `--num-candidates`, `--portfolio-size`: 폴드별 포트폴리오 백테스트 설정
+- `--candidate-pool-size`, `--sampling-temperature`, `--overlap-penalty`, `--unique-bonus`: 후보/포트폴리오 생성 설정
 - `--include-ensemble` / `--no-ensemble`: 폴드별 평균 앙상블 평가 on/off
 - `--mlp-max-iter`, `--mlp-tol`, `--mlp-early-stopping`: 롤링 검증 시 MLP 수렴 설정
 - `--out-json`: 롤링 검증 JSON 저장 경로
@@ -215,9 +250,11 @@ python scripts/tune_xgboost.py
 ./run_pipeline.sh --lgbm-n-estimators 500 --lgbm-num-leaves 63 --lgbm-max-depth 8 --lgbm-min-data-in-leaf 10
 ./run_pipeline.sh --run-lgbm-tuning --run-xgb-tuning
 ./run_pipeline.sh --calibration-bins 15
+./run_pipeline.sh --baseline-protocol portfolio --num-candidates 256 --portfolio-size 12
 ```
 
 파이프라인 출력:
 - `reports/compare.md` (모델 비교 리포트)
 - `reports/rolling_validation.md` (롤링 백테스트 리포트)
-- `reports/predictions.json`, `reports/predictions.csv` (다음 회차 예측)
+- `reports/predictions.json`, `reports/predictions.csv` (번호별 확률/랭킹)
+- `reports/prediction_portfolio.csv` (최종 포트폴리오 티켓)

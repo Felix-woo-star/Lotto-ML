@@ -6,6 +6,7 @@ import os
 import pickle
 
 import pandas as pd
+import lotto_portfolio as lp
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,6 +34,48 @@ def parse_args() -> argparse.Namespace:
         help="추천할 번호 개수.",
     )
     parser.add_argument(
+        "--num-candidates",
+        type=int,
+        default=256,
+        help="생성할 후보 조합 수.",
+    )
+    parser.add_argument(
+        "--portfolio-size",
+        type=int,
+        default=12,
+        help="최종 추천 포트폴리오 티켓 수.",
+    )
+    parser.add_argument(
+        "--candidate-pool-size",
+        type=int,
+        default=18,
+        help="후보 생성 시 샘플링에 사용할 상위 번호 풀 크기.",
+    )
+    parser.add_argument(
+        "--sampling-temperature",
+        type=float,
+        default=0.9,
+        help="후보 생성용 확률 샘플링 temperature.",
+    )
+    parser.add_argument(
+        "--overlap-penalty",
+        type=float,
+        default=0.18,
+        help="포트폴리오 선택 시 중복 번호 패널티 강도.",
+    )
+    parser.add_argument(
+        "--unique-bonus",
+        type=float,
+        default=0.035,
+        help="포트폴리오 선택 시 새로운 번호 커버리지 보너스.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="후보 생성 난수 시드.",
+    )
+    parser.add_argument(
         "--out-json",
         default=None,
         help="예측 결과 JSON 저장 경로.",
@@ -41,6 +84,11 @@ def parse_args() -> argparse.Namespace:
         "--out-csv",
         default=None,
         help="예측 결과 CSV 저장 경로.",
+    )
+    parser.add_argument(
+        "--out-portfolio-csv",
+        default=None,
+        help="포트폴리오 티켓 CSV 저장 경로.",
     )
     return parser.parse_args()
 
@@ -111,19 +159,59 @@ def main() -> int:
     top_rows = ranked.head(args.top_k)
     top_numbers = [int(value) for value in top_rows["number"].tolist()]
 
+    probability_by_number = {
+        int(row["number"]): float(row["proba"])
+        for _, row in ranked[["number", "proba"]].iterrows()
+    }
+    portfolio_bundle = lp.build_portfolio(
+        probability_by_number,
+        num_candidates=args.num_candidates,
+        portfolio_size=args.portfolio_size,
+        top_pool_size=args.candidate_pool_size,
+        temperature=args.sampling_temperature,
+        overlap_penalty=args.overlap_penalty,
+        unique_bonus=args.unique_bonus,
+        seed=args.seed + next_draw,
+    )
+    portfolio = portfolio_bundle["portfolio"]
+    portfolio_summary = portfolio_bundle["summary"]
+
     print(f"Latest draw: {latest_draw}")
     print(f"Predicted draw: {next_draw}")
     print(f"Top-{args.top_k} numbers: {top_numbers}")
+    print(f"Generated candidates: {len(portfolio_bundle['candidates'])}")
+    print(f"Portfolio size: {len(portfolio)}")
+    print(
+        f"Portfolio unique numbers: {portfolio_summary['unique_number_count']} "
+        f"(avg overlap {portfolio_summary['average_pairwise_overlap']:.4f})"
+    )
     if len(model_paths) > 1:
         print(f"Ensemble models: {len(model_paths)}")
 
-    if args.out_json or args.out_csv:
+    if args.out_json or args.out_csv or args.out_portfolio_csv:
         ranked = ranked.reset_index(drop=True)
         ranked["rank"] = ranked.index + 1
         ranked["is_top_k"] = ranked["rank"] <= args.top_k
         ranked["latest_draw"] = latest_draw
         ranked["predicted_draw"] = next_draw
         ranked["model_count"] = len(model_paths)
+
+    portfolio_rows = []
+    for candidate in portfolio:
+        row = {
+            "latest_draw": latest_draw,
+            "predicted_draw": next_draw,
+            "ticket_rank": int(candidate["portfolio_rank"]),
+            "numbers": ",".join(str(number) for number in candidate["numbers"]),
+            "score": float(candidate["selection_score"]),
+            "sum_probability": float(candidate["sum_probability"]),
+            "new_unique_numbers": int(candidate["new_unique_numbers"]),
+            "max_overlap_with_previous": int(candidate["max_overlap_with_previous"]),
+            "source": candidate["source"],
+        }
+        for idx, number in enumerate(candidate["numbers"], start=1):
+            row[f"n{idx}"] = int(number)
+        portfolio_rows.append(row)
 
     if args.out_json:
         os.makedirs(os.path.dirname(args.out_json) or ".", exist_ok=True)
@@ -136,6 +224,31 @@ def main() -> int:
             "recommendations": [
                 {"number": int(row["number"]), "probability": float(row["proba"])}
                 for _, row in top_rows.iterrows()
+            ],
+            "candidate_count": len(portfolio_bundle["candidates"]),
+            "portfolio_config": {
+                "num_candidates": args.num_candidates,
+                "portfolio_size": args.portfolio_size,
+                "candidate_pool_size": args.candidate_pool_size,
+                "sampling_temperature": args.sampling_temperature,
+                "overlap_penalty": args.overlap_penalty,
+                "unique_bonus": args.unique_bonus,
+                "seed": args.seed,
+            },
+            "portfolio_summary": portfolio_summary,
+            "portfolio": [
+                {
+                    "ticket_rank": int(candidate["portfolio_rank"]),
+                    "numbers": [int(number) for number in candidate["numbers"]],
+                    "selection_score": float(candidate["selection_score"]),
+                    "sum_probability": float(candidate["sum_probability"]),
+                    "new_unique_numbers": int(candidate["new_unique_numbers"]),
+                    "max_overlap_with_previous": int(
+                        candidate["max_overlap_with_previous"]
+                    ),
+                    "source": candidate["source"],
+                }
+                for candidate in portfolio
             ],
             "ranked": [
                 {
@@ -165,6 +278,11 @@ def main() -> int:
             ]
         ].to_csv(args.out_csv, index=False)
         print(f"Saved CSV predictions to {args.out_csv}")
+
+    if args.out_portfolio_csv:
+        os.makedirs(os.path.dirname(args.out_portfolio_csv) or ".", exist_ok=True)
+        pd.DataFrame(portfolio_rows).to_csv(args.out_portfolio_csv, index=False)
+        print(f"Saved portfolio CSV to {args.out_portfolio_csv}")
     return 0
 
 

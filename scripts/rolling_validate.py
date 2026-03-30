@@ -9,6 +9,7 @@ from collections import defaultdict
 
 import numpy as np
 import pandas as pd
+import lotto_portfolio as lp
 import train_model as tm
 
 DEFAULT_MODELS = [
@@ -52,6 +53,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=42,
         help="난수 시드.",
+    )
+    parser.add_argument(
+        "--in-processed",
+        default="data/processed/lotto_draws.csv",
+        help="보너스 번호/수익 평가용 정제 CSV 경로.",
     )
     parser.add_argument(
         "--min-train-draws",
@@ -106,6 +112,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mlp-tol", type=float, default=1e-3)
     parser.add_argument("--mlp-validation-fraction", type=float, default=0.1)
     parser.add_argument("--mlp-n-iter-no-change", type=int, default=25)
+    parser.add_argument("--num-candidates", type=int, default=256)
+    parser.add_argument("--portfolio-size", type=int, default=12)
+    parser.add_argument("--candidate-pool-size", type=int, default=18)
+    parser.add_argument("--sampling-temperature", type=float, default=0.9)
+    parser.add_argument("--overlap-penalty", type=float, default=0.18)
+    parser.add_argument("--unique-bonus", type=float, default=0.035)
+    parser.add_argument("--ticket-price", type=float, default=lp.DEFAULT_TICKET_PRICE)
+    parser.add_argument(
+        "--tier1-payout-estimate",
+        type=float,
+        default=lp.DEFAULT_TIER1_ESTIMATE,
+    )
+    parser.add_argument("--tier2-payout", type=float, default=lp.DEFAULT_TIER_PAYOUTS[2])
+    parser.add_argument("--tier3-payout", type=float, default=lp.DEFAULT_TIER_PAYOUTS[3])
+    parser.add_argument("--tier4-payout", type=float, default=lp.DEFAULT_TIER_PAYOUTS[4])
+    parser.add_argument("--tier5-payout", type=float, default=lp.DEFAULT_TIER_PAYOUTS[5])
     parser.add_argument(
         "--mlp-early-stopping",
         dest="mlp_early_stopping",
@@ -253,6 +275,38 @@ def summarize_model(metrics_list: list[dict], thresholds: list[int]) -> dict:
         values = [float(item[key]) for item in metrics_list if key in item]
         if values:
             summary[key] = summarize_values(values)
+    portfolio_metrics = [item["portfolio"] for item in metrics_list if "portfolio" in item]
+    if portfolio_metrics:
+        summary["portfolio"] = {
+            "average_best_hits": summarize_values(
+                [float(item["average_best_hits"]) for item in portfolio_metrics]
+            ),
+            "average_unique_numbers": summarize_values(
+                [float(item["average_unique_numbers"]) for item in portfolio_metrics]
+            ),
+            "average_pairwise_overlap": summarize_values(
+                [float(item["average_pairwise_overlap"]) for item in portfolio_metrics]
+            ),
+            "expected_payout": summarize_values(
+                [float(item["expected_payout"]) for item in portfolio_metrics]
+            ),
+            "expected_profit": summarize_values(
+                [float(item["expected_profit"]) for item in portfolio_metrics]
+            ),
+            "roi": summarize_values([float(item["roi"]) for item in portfolio_metrics]),
+            "best_hit_rates": {
+                threshold: summarize_values(
+                    [float(item["best_hit_rates"][threshold]) for item in portfolio_metrics]
+                )
+                for threshold in thresholds
+            },
+            "tier_hit_rates": {
+                tier: summarize_values(
+                    [float(item["tier_hit_rates"][tier]) for item in portfolio_metrics]
+                )
+                for tier in range(1, 6)
+            },
+        }
     return summary
 
 
@@ -277,6 +331,10 @@ def score_metrics(metrics: dict, thresholds: list[int]) -> float:
     score -= float(metrics.get("brier", 0.0)) * 0.10
     score -= float(metrics.get("log_loss", 0.0)) * 0.05
     score -= float(metrics.get("ece", 0.0)) * 0.10
+    portfolio = metrics.get("portfolio", {})
+    if portfolio:
+        score += float(portfolio.get("average_best_hits", 0.0)) * 0.25
+        score += float(portfolio.get("roi", 0.0)) * 0.02
     return float(score)
 
 
@@ -291,6 +349,13 @@ def score_summary(summary: dict, thresholds: list[int]) -> float:
     for key in ("mrr", "mean_min_rank", "brier", "log_loss", "ece"):
         if key in summary:
             metrics[key] = summary[key]["mean"]
+    portfolio = summary.get("portfolio")
+    if portfolio:
+        metrics["portfolio"] = {
+            "average_best_hits": portfolio["average_best_hits"]["mean"],
+            "expected_profit": portfolio["expected_profit"]["mean"],
+            "roi": portfolio["roi"]["mean"],
+        }
     return score_metrics(metrics, thresholds)
 
 
@@ -343,6 +408,9 @@ def render_markdown(
             "MRR(평균±표준편차)",
             "Brier(평균±표준편차)",
             "ECE(평균±표준편차)",
+            "포트폴리오 최대일치",
+            "포트폴리오 예상수익",
+            "포트폴리오 ROI",
             "종합점수",
         ]
         lines.extend(["## 모델 요약", ""])
@@ -363,9 +431,25 @@ def render_markdown(
             mrr = summary.get("mrr", {"mean": 0.0, "std": 0.0})
             brier = summary.get("brier", {"mean": 0.0, "std": 0.0})
             ece = summary.get("ece", {"mean": 0.0, "std": 0.0})
+            portfolio = summary.get("portfolio", {})
             row.append(f"{mrr['mean']:.4f} ± {mrr['std']:.4f}")
             row.append(f"{brier['mean']:.6f} ± {brier['std']:.6f}")
             row.append(f"{ece['mean']:.6f} ± {ece['std']:.6f}")
+            if portfolio:
+                row.append(
+                    f"{portfolio['average_best_hits']['mean']:.4f} ± "
+                    f"{portfolio['average_best_hits']['std']:.4f}"
+                )
+                row.append(
+                    f"{portfolio['expected_profit']['mean']:.2f} ± "
+                    f"{portfolio['expected_profit']['std']:.2f}"
+                )
+                row.append(
+                    f"{portfolio['roi']['mean']:.6f} ± "
+                    f"{portfolio['roi']['std']:.6f}"
+                )
+            else:
+                row.extend(["N/A", "N/A", "N/A"])
             row.append(f"{score_summary(summary, thresholds):.4f}")
             lines.append("| " + " | ".join(row) + " |")
         lines.append("")
@@ -404,6 +488,9 @@ def main() -> int:
     if not os.path.exists(args.in_parquet):
         print(f"Missing input file: {args.in_parquet}")
         return 1
+    if args.portfolio_size > 0 and not os.path.exists(args.in_processed):
+        print(f"Missing processed draw file: {args.in_processed}")
+        return 1
 
     models = parse_models(args.models)
     if not models:
@@ -413,6 +500,9 @@ def main() -> int:
     thresholds = parse_thresholds(args.hit_thresholds)
     df = pd.read_parquet(args.in_parquet).fillna(0)
     feature_cols = [col for col in df.columns if col not in ("label", "draw_no")]
+    draw_contexts = lp.load_draw_contexts(args.in_processed)
+    portfolio_config = tm.build_portfolio_config(args)
+    prize_config = tm.build_prize_config(args)
 
     draws = sorted(int(value) for value in df["draw_no"].unique())
     folds = build_folds(
@@ -460,6 +550,9 @@ def main() -> int:
                 test_df,
                 thresholds,
                 calibration_bins=args.calibration_bins,
+                draw_contexts=draw_contexts,
+                portfolio_config=portfolio_config,
+                prize_config=prize_config,
             )
             per_model_metrics[model_name].append(metrics)
             fold_payload["metrics"][model_name] = metrics
@@ -474,6 +567,9 @@ def main() -> int:
                 test_df,
                 thresholds,
                 calibration_bins=args.calibration_bins,
+                draw_contexts=draw_contexts,
+                portfolio_config=portfolio_config,
+                prize_config=prize_config,
             )
             per_model_metrics[ensemble_name].append(ensemble_metrics)
             fold_payload["metrics"][ensemble_name] = ensemble_metrics
@@ -503,6 +599,12 @@ def main() -> int:
             "feature_count": len(feature_cols),
             "calibration_bins": args.calibration_bins,
             "include_ensemble": args.include_ensemble,
+            "portfolio_config": portfolio_config,
+            "prize_config": {
+                "ticket_price": prize_config["ticket_price"],
+                "tier1_estimate": prize_config["tier1_estimate"],
+                "tier_payouts": prize_config["tier_payouts"],
+            },
         },
         "unavailable_models": unavailable_models,
         "folds": fold_results,

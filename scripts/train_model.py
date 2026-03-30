@@ -10,6 +10,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+import lotto_portfolio as lp
 from sklearn.ensemble import (
     ExtraTreesClassifier,
     HistGradientBoostingClassifier,
@@ -61,6 +62,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=42,
         help="난수 시드.",
+    )
+    parser.add_argument(
+        "--in-processed",
+        default="data/processed/lotto_draws.csv",
+        help="보너스 번호/수익 평가용 정제 CSV 경로.",
     )
     parser.add_argument(
         "--model",
@@ -187,6 +193,78 @@ def parse_args() -> argparse.Namespace:
         dest="mlp_early_stopping",
         action="store_false",
         help="MLP early stopping 비활성화.",
+    )
+    parser.add_argument(
+        "--num-candidates",
+        type=int,
+        default=256,
+        help="회차당 생성할 후보 조합 수.",
+    )
+    parser.add_argument(
+        "--portfolio-size",
+        type=int,
+        default=12,
+        help="최종 포트폴리오 티켓 수.",
+    )
+    parser.add_argument(
+        "--candidate-pool-size",
+        type=int,
+        default=18,
+        help="후보 생성 시 샘플링에 사용할 상위 번호 풀 크기.",
+    )
+    parser.add_argument(
+        "--sampling-temperature",
+        type=float,
+        default=0.9,
+        help="후보 생성용 확률 샘플링 temperature. 낮을수록 상위 번호에 집중한다.",
+    )
+    parser.add_argument(
+        "--overlap-penalty",
+        type=float,
+        default=0.18,
+        help="포트폴리오 선택 시 중복 번호 패널티 강도.",
+    )
+    parser.add_argument(
+        "--unique-bonus",
+        type=float,
+        default=0.035,
+        help="포트폴리오 선택 시 새로운 번호 커버리지 보너스.",
+    )
+    parser.add_argument(
+        "--ticket-price",
+        type=float,
+        default=lp.DEFAULT_TICKET_PRICE,
+        help="티켓 1장 가격.",
+    )
+    parser.add_argument(
+        "--tier1-payout-estimate",
+        type=float,
+        default=lp.DEFAULT_TIER1_ESTIMATE,
+        help="1등 실제 금액이 없을 때 사용할 추정 당첨금.",
+    )
+    parser.add_argument(
+        "--tier2-payout",
+        type=float,
+        default=lp.DEFAULT_TIER_PAYOUTS[2],
+        help="2등 평가용 당첨금 추정치.",
+    )
+    parser.add_argument(
+        "--tier3-payout",
+        type=float,
+        default=lp.DEFAULT_TIER_PAYOUTS[3],
+        help="3등 평가용 당첨금 추정치.",
+    )
+    parser.add_argument(
+        "--tier4-payout",
+        type=float,
+        default=lp.DEFAULT_TIER_PAYOUTS[4],
+        help="4등 평가용 당첨금.",
+    )
+    parser.add_argument(
+        "--tier5-payout",
+        type=float,
+        default=lp.DEFAULT_TIER_PAYOUTS[5],
+        help="5등 평가용 당첨금.",
     )
 
     parser.add_argument(
@@ -368,6 +446,10 @@ def evaluate(
     feature_cols: list[str],
     thresholds: list[int],
     calibration_bins: int = 10,
+    *,
+    draw_contexts: dict[int, dict] | None = None,
+    portfolio_config: dict | None = None,
+    prize_config: dict | None = None,
 ) -> dict:
     """테스트 구간에서 Top-6 추천 정확도를 계산한다."""
     proba = model.predict_proba(test_df[feature_cols])[:, 1]
@@ -376,6 +458,9 @@ def evaluate(
         test_df,
         thresholds,
         calibration_bins=calibration_bins,
+        draw_contexts=draw_contexts,
+        portfolio_config=portfolio_config,
+        prize_config=prize_config,
     )
 
 
@@ -413,6 +498,10 @@ def evaluate_from_proba(
     test_df: pd.DataFrame,
     thresholds: list[int],
     calibration_bins: int = 10,
+    *,
+    draw_contexts: dict[int, dict] | None = None,
+    portfolio_config: dict | None = None,
+    prize_config: dict | None = None,
 ) -> dict:
     """확률값 배열을 받아 Top-6 추천 및 캘리브레이션 지표를 계산한다."""
     scored = test_df.copy()
@@ -464,7 +553,7 @@ def evaluate_from_proba(
     mrr = float(np.mean(reciprocal_ranks)) if reciprocal_ranks else 0.0
     mean_min_rank = float(np.mean(min_ranks)) if min_ranks else 0.0
 
-    return {
+    metrics = {
         "average_hits": average_hits,
         "hit_rates": hit_rates,
         "draws": len(hits),
@@ -475,6 +564,108 @@ def evaluate_from_proba(
         "ece": ece,
         "calibration_bins": int(max(2, calibration_bins)),
     }
+    if portfolio_config and int(portfolio_config.get("portfolio_size", 0)) > 0:
+        draw_contexts = draw_contexts or {}
+        prize_config = prize_config or build_prize_config_from_values()
+        portfolio_results: list[dict] = []
+        for draw_no, group in scored.groupby("draw_no"):
+            probability_by_number = {
+                int(row["number"]): float(row["proba"])
+                for _, row in group.iterrows()
+            }
+            context = draw_contexts.get(int(draw_no), {})
+            winning_numbers = tuple(sorted(
+                int(value) for value in group.loc[group["label"] == 1, "number"].tolist()
+            ))
+            portfolio_bundle = lp.build_portfolio(
+                probability_by_number,
+                num_candidates=int(portfolio_config["num_candidates"]),
+                portfolio_size=int(portfolio_config["portfolio_size"]),
+                top_pool_size=int(portfolio_config["candidate_pool_size"]),
+                temperature=float(portfolio_config["sampling_temperature"]),
+                overlap_penalty=float(portfolio_config["overlap_penalty"]),
+                unique_bonus=float(portfolio_config["unique_bonus"]),
+                seed=int(portfolio_config["seed"]) + int(draw_no),
+            )
+            portfolio_result = lp.evaluate_portfolio(
+                portfolio_bundle["portfolio"],
+                winning_numbers,
+                int(context.get("bonus", 0)),
+                draw_context=context,
+                tier_payouts=prize_config["tier_payouts"],
+                ticket_price=float(prize_config["ticket_price"]),
+                tier1_estimate=float(prize_config["tier1_estimate"]),
+            )
+            portfolio_results.append(portfolio_result)
+
+        portfolio_metrics = lp.summarize_portfolio_results(portfolio_results, thresholds)
+        portfolio_metrics["config"] = portfolio_config
+        portfolio_metrics["prize_config"] = {
+            "ticket_price": float(prize_config["ticket_price"]),
+            "tier1_estimate": float(prize_config["tier1_estimate"]),
+            "tier_payouts": prize_config["tier_payouts"],
+        }
+        metrics["portfolio"] = portfolio_metrics
+    return metrics
+
+
+def build_portfolio_config(args: argparse.Namespace) -> dict:
+    """Build a serializable portfolio generation config."""
+    return {
+        "num_candidates": int(args.num_candidates),
+        "portfolio_size": int(args.portfolio_size),
+        "candidate_pool_size": int(args.candidate_pool_size),
+        "sampling_temperature": float(args.sampling_temperature),
+        "overlap_penalty": float(args.overlap_penalty),
+        "unique_bonus": float(args.unique_bonus),
+        "seed": int(args.seed),
+    }
+
+
+def build_prize_config(args: argparse.Namespace) -> dict:
+    """Build a payout configuration for portfolio backtests."""
+    return {
+        "ticket_price": float(args.ticket_price),
+        "tier1_estimate": float(args.tier1_payout_estimate),
+        "tier_payouts": {
+            2: float(args.tier2_payout),
+            3: float(args.tier3_payout),
+            4: float(args.tier4_payout),
+            5: float(args.tier5_payout),
+        },
+    }
+
+
+def build_prize_config_from_values() -> dict:
+    """Fallback payout config used when explicit CLI args are unavailable."""
+    return {
+        "ticket_price": float(lp.DEFAULT_TICKET_PRICE),
+        "tier1_estimate": float(lp.DEFAULT_TIER1_ESTIMATE),
+        "tier_payouts": dict(lp.DEFAULT_TIER_PAYOUTS),
+    }
+
+
+def print_portfolio_metrics(portfolio_metrics: dict, thresholds: list[int]) -> None:
+    """Print a concise portfolio backtest summary."""
+    print("Portfolio metrics")
+    print(f"- portfolio_size: {portfolio_metrics['portfolio_size']}")
+    print(f"- average_best_hits: {portfolio_metrics['average_best_hits']:.4f}")
+    for threshold in thresholds:
+        value = portfolio_metrics["best_hit_rates"][threshold]
+        print(f"- portfolio_hit_rate_{threshold}: {value:.4f}")
+    print(f"- average_unique_numbers: {portfolio_metrics['average_unique_numbers']:.4f}")
+    print(
+        f"- average_pairwise_overlap: "
+        f"{portfolio_metrics['average_pairwise_overlap']:.4f}"
+    )
+    print(f"- expected_payout: {portfolio_metrics['expected_payout']:.2f}")
+    print(f"- expected_profit: {portfolio_metrics['expected_profit']:.2f}")
+    print(f"- roi: {portfolio_metrics['roi']:.6f}")
+    for tier in range(1, 6):
+        print(
+            f"- tier_{tier}_hit_rate: "
+            f"{portfolio_metrics['tier_hit_rates'][tier]:.6f}"
+        )
 
 
 def write_json(path: str, payload: dict) -> None:
@@ -559,6 +750,9 @@ def main() -> int:
     if not os.path.exists(args.in_parquet):
         print(f"Missing input file: {args.in_parquet}")
         return 1
+    if args.portfolio_size > 0 and not os.path.exists(args.in_processed):
+        print(f"Missing processed draw file: {args.in_processed}")
+        return 1
 
     df = pd.read_parquet(args.in_parquet).fillna(0)
     train_df, test_df, train_draws, test_draws = split_by_draw(
@@ -573,6 +767,9 @@ def main() -> int:
     ]
 
     feature_cols = [col for col in df.columns if col not in ("label", "draw_no")]
+    draw_contexts = lp.load_draw_contexts(args.in_processed)
+    portfolio_config = build_portfolio_config(args)
+    prize_config = build_prize_config(args)
 
     try:
         model = build_model(args)
@@ -587,6 +784,9 @@ def main() -> int:
         feature_cols,
         thresholds,
         calibration_bins=args.calibration_bins,
+        draw_contexts=draw_contexts,
+        portfolio_config=portfolio_config,
+        prize_config=prize_config,
     )
 
     print("Model metrics")
@@ -598,6 +798,8 @@ def main() -> int:
     print(f"- brier: {metrics['brier']:.6f}")
     print(f"- log_loss: {metrics['log_loss']:.6f}")
     print(f"- ece: {metrics['ece']:.6f}")
+    if "portfolio" in metrics:
+        print_portfolio_metrics(metrics["portfolio"], thresholds)
 
     if args.out_model:
         ensure_parent_dir(args.out_model)
@@ -620,6 +822,12 @@ def main() -> int:
             "feature_count": len(feature_cols),
             "model": args.model,
             "model_params": build_model_params(args),
+            "portfolio_config": portfolio_config,
+            "prize_config": {
+                "ticket_price": prize_config["ticket_price"],
+                "tier1_estimate": prize_config["tier1_estimate"],
+                "tier_payouts": prize_config["tier_payouts"],
+            },
         }
 
         payload = {"config": config, "metrics": metrics}
@@ -636,6 +844,17 @@ def main() -> int:
             row["brier"] = metrics["brier"]
             row["log_loss"] = metrics["log_loss"]
             row["ece"] = metrics["ece"]
+            portfolio = metrics.get("portfolio")
+            if portfolio:
+                row["portfolio_average_best_hits"] = portfolio["average_best_hits"]
+                row["portfolio_expected_payout"] = portfolio["expected_payout"]
+                row["portfolio_expected_profit"] = portfolio["expected_profit"]
+                row["portfolio_roi"] = portfolio["roi"]
+                row["portfolio_average_unique_numbers"] = portfolio["average_unique_numbers"]
+                for threshold in thresholds:
+                    row[f"portfolio_hit_rate_{threshold}"] = portfolio["best_hit_rates"][
+                        threshold
+                    ]
             row.update(config)
             fieldnames = list(row.keys())
             write_csv(args.out_csv, [row], fieldnames)

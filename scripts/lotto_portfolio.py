@@ -66,6 +66,14 @@ def load_draw_contexts(path: str) -> dict[int, dict]:
                 "bonus": parse_int(row.get("bonus")),
                 "first_prize_amount": parse_float(row.get("first_prize_amount")),
                 "first_prize_winner_count": parse_int(row.get("first_prize_winner_count")),
+                "second_prize_amount": parse_float(row.get("second_prize_amount")),
+                "second_prize_winner_count": parse_int(
+                    row.get("second_prize_winner_count")
+                ),
+                "third_prize_amount": parse_float(row.get("third_prize_amount")),
+                "third_prize_winner_count": parse_int(
+                    row.get("third_prize_winner_count")
+                ),
                 "first_accum_amount": parse_float(row.get("first_accum_amount")),
             }
     return contexts
@@ -304,6 +312,18 @@ def tier_payout(
     tier1_estimate: float,
 ) -> float:
     """Return the payout amount used for the given tier."""
+    if draw_context and tier == 1:
+        actual = parse_float(draw_context.get("first_prize_amount"))
+        if actual > 0:
+            return actual
+    if draw_context and tier == 2:
+        actual = parse_float(draw_context.get("second_prize_amount"))
+        if actual > 0:
+            return actual
+    if draw_context and tier == 3:
+        actual = parse_float(draw_context.get("third_prize_amount"))
+        if actual > 0:
+            return actual
     if tier == 1:
         if draw_context:
             actual = parse_float(draw_context.get("first_prize_amount"))

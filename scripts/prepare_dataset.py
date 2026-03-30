@@ -18,6 +18,10 @@ OUTPUT_FIELDS = [
     "total_sell_amount",
     "first_prize_amount",
     "first_prize_winner_count",
+    "second_prize_amount",
+    "second_prize_winner_count",
+    "third_prize_amount",
+    "third_prize_winner_count",
     "first_accum_amount",
 ]
 
@@ -111,6 +115,14 @@ def validate_row(row: dict) -> tuple[dict | None, list[str]]:
         "first_prize_amount": parse_optional_int(row.get("first_prize_amount")),
         "first_prize_winner_count": parse_optional_int(
             row.get("first_prize_winner_count")
+        ),
+        "second_prize_amount": parse_optional_int(row.get("second_prize_amount")),
+        "second_prize_winner_count": parse_optional_int(
+            row.get("second_prize_winner_count")
+        ),
+        "third_prize_amount": parse_optional_int(row.get("third_prize_amount")),
+        "third_prize_winner_count": parse_optional_int(
+            row.get("third_prize_winner_count")
         ),
         "first_accum_amount": parse_optional_int(row.get("first_accum_amount")),
     }

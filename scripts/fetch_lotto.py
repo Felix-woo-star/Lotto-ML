@@ -7,6 +7,7 @@
 import argparse
 import csv
 import gzip
+import html
 import importlib
 import json
 import os
@@ -48,6 +49,10 @@ OUTPUT_FIELDS = [
     "total_sell_amount",
     "first_prize_amount",
     "first_prize_winner_count",
+    "second_prize_amount",
+    "second_prize_winner_count",
+    "third_prize_amount",
+    "third_prize_winner_count",
     "first_accum_amount",
 ]
 
@@ -102,17 +107,19 @@ def resolve_project_path(path: str) -> str:
     return os.path.join(PROJECT_ROOT, path)
 
 
-def read_existing_draws(path: str) -> tuple[set[int], int]:
-    """기존 CSV에서 회차 목록과 최대 회차를 읽어온다."""
-    existing = set()
+def read_existing_draws(path: str) -> tuple[dict[int, dict], list[str], int]:
+    """기존 CSV에서 회차별 행과 헤더, 최대 회차를 읽어온다."""
+    rows_by_draw: dict[int, dict] = {}
+    fieldnames: list[str] = []
     max_no = 0
     if not os.path.exists(path):
-        return existing, max_no
+        return rows_by_draw, fieldnames, max_no
 
     with open(path, newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         if not reader.fieldnames:
-            return existing, max_no
+            return rows_by_draw, fieldnames, max_no
+        fieldnames = list(reader.fieldnames)
 
         for row in reader:
             value = row.get("draw_no")
@@ -122,10 +129,10 @@ def read_existing_draws(path: str) -> tuple[set[int], int]:
                 draw_no = int(value)
             except ValueError:
                 continue
-            existing.add(draw_no)
+            rows_by_draw[draw_no] = row
             if draw_no > max_no:
                 max_no = draw_no
-    return existing, max_no
+    return rows_by_draw, fieldnames, max_no
 
 
 def to_int(value: object) -> int:
@@ -148,6 +155,18 @@ def normalize_record(data: dict) -> dict:
         "total_sell_amount": to_int(data.get("totSellamnt")),
         "first_prize_amount": to_int(data.get("firstWinamnt")),
         "first_prize_winner_count": to_int(data.get("firstPrzwnerCo")),
+        "second_prize_amount": to_int(
+            data.get("secondWinamnt", data.get("rnk2WnAmt"))
+        ),
+        "second_prize_winner_count": to_int(
+            data.get("secondPrzwnerCo", data.get("rnk2WnNope"))
+        ),
+        "third_prize_amount": to_int(
+            data.get("thirdWinamnt", data.get("rnk3WnAmt"))
+        ),
+        "third_prize_winner_count": to_int(
+            data.get("thirdPrzwnerCo", data.get("rnk3WnNope"))
+        ),
         "first_accum_amount": to_int(data.get("firstAccumamnt")),
     }
 
@@ -176,8 +195,79 @@ def normalize_lt645_row(row: dict) -> dict:
         "totSellamnt": to_int(row.get("wholEpsdSumNtslAmt")),
         "firstWinamnt": to_int(row.get("rnk1WnAmt")),
         "firstPrzwnerCo": to_int(row.get("rnk1WnNope")),
+        "secondWinamnt": to_int(row.get("rnk2WnAmt")),
+        "secondPrzwnerCo": to_int(row.get("rnk2WnNope")),
+        "thirdWinamnt": to_int(row.get("rnk3WnAmt")),
+        "thirdPrzwnerCo": to_int(row.get("rnk3WnNope")),
         "firstAccumamnt": to_int(row.get("rnk1SumWnAmt")),
     }
+
+
+def clean_html_text(value: str) -> str:
+    """HTML fragment를 공백 정리된 일반 텍스트로 변환한다."""
+    text = re.sub(r"<[^>]+>", " ", value)
+    text = html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def parse_money_text(value: str) -> int:
+    """쉼표/원 단위 텍스트를 정수 금액으로 변환한다."""
+    digits = re.sub(r"[^\d]", "", value)
+    return int(digits) if digits else 0
+
+
+def extract_prize_table_details(html_text: str) -> dict:
+    """결과 페이지 표에서 1~3등 실당첨금과 당첨자 수를 추출한다."""
+    details = {
+        "firstWinamnt": 0,
+        "firstPrzwnerCo": 0,
+        "secondWinamnt": 0,
+        "secondPrzwnerCo": 0,
+        "thirdWinamnt": 0,
+        "thirdPrzwnerCo": 0,
+    }
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html_text, flags=re.IGNORECASE | re.DOTALL)
+    for row_html in rows:
+        cells = re.findall(
+            r"<t[dh][^>]*>(.*?)</t[dh]>",
+            row_html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        texts = [clean_html_text(cell) for cell in cells]
+        if len(texts) < 4:
+            continue
+        tier = texts[0]
+        if tier not in {"1등", "2등", "3등"}:
+            continue
+        winner_count = parse_money_text(texts[2])
+        prize_amount = parse_money_text(texts[3])
+        if tier == "1등":
+            details["firstWinamnt"] = prize_amount
+            details["firstPrzwnerCo"] = winner_count
+        elif tier == "2등":
+            details["secondWinamnt"] = prize_amount
+            details["secondPrzwnerCo"] = winner_count
+        elif tier == "3등":
+            details["thirdWinamnt"] = prize_amount
+            details["thirdPrzwnerCo"] = winner_count
+    return details
+
+
+def merge_draw_details(base: dict, details: dict) -> dict:
+    """기존 회차 데이터에 페이지 상세 당첨금 정보를 병합한다."""
+    merged = dict(base)
+    for key, value in details.items():
+        if to_int(merged.get(key)) <= 0 and to_int(value) > 0:
+            merged[key] = value
+    return merged
+
+
+def row_needs_prize_backfill(row: dict) -> bool:
+    """기존 행에 2등/3등 실당첨금 정보가 비어 있는지 확인한다."""
+    return (
+        to_int(row.get("second_prize_amount")) <= 0
+        or to_int(row.get("third_prize_amount")) <= 0
+    )
 
 
 def extract_lt645_draw(text: str, draw_no: int) -> dict | None:
@@ -283,6 +373,7 @@ def decode_http_text(content: bytes, headers) -> str:
 
 def parse_draw_page(html: str, requested_draw_no: int) -> dict | None:
     """결과 페이지 HTML에서 회차 정보를 추출한다."""
+    prize_details = extract_prize_table_details(html)
     js_draw_no = re.search(r"drwNo\s*[:=]\s*['\"]?(\d{1,5})['\"]?", html)
     js_date = re.search(
         r"drwNoDate\s*[:=]\s*['\"]?(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})['\"]?",
@@ -303,7 +394,8 @@ def parse_draw_page(html: str, requested_draw_no: int) -> dict | None:
         if page_draw_no != requested_draw_no:
             return None
         year, month, day = js_date.groups()
-        return {
+        return merge_draw_details(
+            {
             "returnValue": "success",
             "drwNo": page_draw_no,
             "drwNoDate": f"{int(year):04d}-{int(month):02d}-{int(day):02d}",
@@ -318,7 +410,9 @@ def parse_draw_page(html: str, requested_draw_no: int) -> dict | None:
             "firstWinamnt": 0,
             "firstPrzwnerCo": 0,
             "firstAccumamnt": 0,
-        }
+            },
+            prize_details,
+        )
 
     draw_no_match = re.search(r"제\s*(\d{1,5})\s*회", html)
     page_draw_no = int(draw_no_match.group(1)) if draw_no_match else requested_draw_no
@@ -343,7 +437,8 @@ def parse_draw_page(html: str, requested_draw_no: int) -> dict | None:
     if len(numbers) < 7:
         return None
 
-    return {
+    return merge_draw_details(
+        {
         "returnValue": "success",
         "drwNo": page_draw_no,
         "drwNoDate": draw_date,
@@ -358,7 +453,42 @@ def parse_draw_page(html: str, requested_draw_no: int) -> dict | None:
         "firstWinamnt": 0,
         "firstPrzwnerCo": 0,
         "firstAccumamnt": 0,
-    }
+        },
+        prize_details,
+    )
+
+
+def fetch_draw_page_via_urllib(draw_no: int, timeout: float, max_retries: int) -> dict | None:
+    """결과 페이지 HTML을 직접 조회해 상세 당첨금을 보강한다."""
+    url = DRAW_PAGE_URL.format(draw_no=draw_no)
+    last_error: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            request = Request(
+                url,
+                headers={
+                    "User-Agent": DEFAULT_USER_AGENT,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Encoding": "gzip, deflate",
+                    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+                    "Referer": HOME_URL,
+                },
+            )
+            with urlopen(request, timeout=timeout) as response:
+                html_text = decode_http_text(response.read(), response.headers)
+            return parse_draw_page(html_text, draw_no)
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            UnicodeDecodeError,
+            ValueError,
+        ) as err:
+            last_error = err
+            time.sleep(0.5 * (attempt + 1))
+    if last_error is not None and not is_soft_no_data_error(last_error):
+        raise RuntimeError(f"Failed to fetch draw page {draw_no}: {last_error}")
+    return None
 
 
 def fetch_draw_from_lt645_api(draw_no: int, timeout: float, max_retries: int) -> dict | None:
@@ -403,6 +533,9 @@ def fetch_draw_via_urllib(draw_no: int, timeout: float, max_retries: int) -> dic
     """urllib 엔진으로 회차 데이터를 조회한다."""
     data = fetch_draw_from_lt645_api(draw_no, timeout, max_retries)
     if data is not None:
+        page_details = fetch_draw_page_via_urllib(draw_no, timeout, max_retries)
+        if page_details is not None:
+            return merge_draw_details(data, page_details)
         return data
 
     urls = [template.format(draw_no=draw_no) for template in API_URLS]
@@ -435,6 +568,11 @@ def fetch_draw_via_urllib(draw_no: int, timeout: float, max_retries: int) -> dic
                             f"Unexpected draw number in response: "
                             f"requested={draw_no}, response={response_draw_no}"
                         )
+                    page_details = fetch_draw_page_via_urllib(
+                        draw_no, timeout, max_retries
+                    )
+                    if page_details is not None:
+                        return merge_draw_details(data, page_details)
                     return data
                 if return_value in {"fail", ""}:
                     continue
@@ -540,6 +678,16 @@ class PlaywrightFetcher:
                         last_error = err
                         data = None
                     if data is not None:
+                        self._page.goto(
+                            url,
+                            wait_until="domcontentloaded",
+                            timeout=self.timeout_ms,
+                        )
+                        self._page.wait_for_timeout(350)
+                        html = self._page.content()
+                        page_data = parse_draw_page(html, draw_no)
+                        if page_data is not None:
+                            return merge_draw_details(data, page_data)
                         return data
 
                 self._page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
@@ -577,6 +725,9 @@ class PlaywrightFetcher:
                     return_value = str(payload.get("returnValue", "")).lower()
                     if return_value == "success":
                         if to_int(payload.get("drwNo")) == draw_no:
+                            page_data = parse_draw_page(html, draw_no)
+                            if page_data is not None:
+                                return merge_draw_details(payload, page_data)
                             return payload
                     elif return_value in {"fail", ""}:
                         return None
@@ -611,7 +762,8 @@ def main() -> int:
     args = parse_args()
     args.out_raw = resolve_project_path(args.out_raw)
 
-    existing, max_existing = read_existing_draws(args.out_raw)
+    existing_rows, existing_fieldnames, max_existing = read_existing_draws(args.out_raw)
+    existing = set(existing_rows)
     start = args.start
     if existing and start <= max_existing:
         start = max_existing + 1
@@ -622,71 +774,104 @@ def main() -> int:
         return 0
 
     os.makedirs(os.path.dirname(args.out_raw) or ".", exist_ok=True)
-    file_exists = os.path.exists(args.out_raw)
-    needs_header = not file_exists or os.path.getsize(args.out_raw) == 0
-
     fetch_context = None
     fetch_fn = None
     fetched = 0
+    updated_existing = 0
+    rows_by_draw = {
+        draw_no: {field: row.get(field, "") for field in OUTPUT_FIELDS}
+        for draw_no, row in existing_rows.items()
+    }
+    needs_rewrite = existing_fieldnames != OUTPUT_FIELDS
+    backfill_draws = sorted(
+        draw_no
+        for draw_no, row in rows_by_draw.items()
+        if row_needs_prize_backfill(row)
+    )
 
     try:
         fetch_context, fetch_fn = build_fetch_fn(args)
-        with open(args.out_raw, "a", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=OUTPUT_FIELDS)
-            if needs_header:
-                writer.writeheader()
+        for draw_no in backfill_draws:
+            try:
+                data = fetch_fn(draw_no)
+            except RuntimeError as err:
+                if is_soft_no_data_error(err):
+                    data = None
+                else:
+                    print(f"Warning: prize backfill failed for draw {draw_no}: {err}")
+                    print(
+                        "Stopping safely without rewriting rows. "
+                        "Check network/WAF and try again."
+                    )
+                    return 1
+            if data is None:
+                continue
+            rows_by_draw[draw_no] = normalize_record(data)
+            updated_existing += 1
+            needs_rewrite = True
+            if args.sleep > 0:
+                time.sleep(args.sleep)
 
-            draw_no = start
-            while True:
-                if args.end is not None and draw_no > args.end:
-                    break
-                if draw_no in existing:
-                    draw_no += 1
-                    continue
-
-                try:
-                    data = fetch_fn(draw_no)
-                except RuntimeError as err:
-                    if is_soft_no_data_error(err):
-                        data = None
-                    else:
-                        print(
-                            f"Warning: fetch failed for draw {draw_no}: {err}"
-                        )
-                        print(
-                            "Stopping safely without appending new rows. "
-                            "Check network/WAF and try again."
-                        )
-                        break
-                if data is None:
-                    if args.end is None:
-                        if draw_no > 1:
-                            known = fetch_fn(draw_no - 1)
-                            if known is None:
-                                print(
-                                    "Warning: data source validation failed. "
-                                    f"draw {draw_no - 1} could not be verified."
-                                )
-                                print(
-                                    "Stopping safely without appending new rows. "
-                                    "Check network/WAF and try again."
-                                )
-                                break
-                        print(f"No data for draw {draw_no}; assuming latest draw.")
-                    else:
-                        print(f"No data for draw {draw_no}; stopping.")
-                    break
-
-                writer.writerow(normalize_record(data))
-                fetched += 1
-                if args.sleep > 0:
-                    time.sleep(args.sleep)
+        draw_no = start
+        while True:
+            if args.end is not None and draw_no > args.end:
+                break
+            if draw_no in existing:
                 draw_no += 1
+                continue
+
+            try:
+                data = fetch_fn(draw_no)
+            except RuntimeError as err:
+                if is_soft_no_data_error(err):
+                    data = None
+                else:
+                    print(f"Warning: fetch failed for draw {draw_no}: {err}")
+                    print(
+                        "Stopping safely without appending new rows. "
+                        "Check network/WAF and try again."
+                    )
+                    break
+            if data is None:
+                if args.end is None:
+                    if draw_no > 1:
+                        known = fetch_fn(draw_no - 1)
+                        if known is None:
+                            print(
+                                "Warning: data source validation failed. "
+                                f"draw {draw_no - 1} could not be verified."
+                            )
+                            print(
+                                "Stopping safely without appending new rows. "
+                                "Check network/WAF and try again."
+                            )
+                            break
+                    print(f"No data for draw {draw_no}; assuming latest draw.")
+                else:
+                    print(f"No data for draw {draw_no}; stopping.")
+                break
+
+            rows_by_draw[draw_no] = normalize_record(data)
+            fetched += 1
+            needs_rewrite = True
+            if args.sleep > 0:
+                time.sleep(args.sleep)
+            draw_no += 1
     finally:
         if fetch_context is not None:
             fetch_context.__exit__(None, None, None)
 
-    print(f"Fetched {fetched} new draws into {args.out_raw}.")
+    if needs_rewrite:
+        with open(args.out_raw, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=OUTPUT_FIELDS)
+            writer.writeheader()
+            for draw_no in sorted(rows_by_draw):
+                writer.writerow(rows_by_draw[draw_no])
+
+    print(
+        f"Fetched {fetched} new draws into {args.out_raw}. "
+        f"Backfilled {updated_existing} existing draws."
+    )
     return 0
 
 

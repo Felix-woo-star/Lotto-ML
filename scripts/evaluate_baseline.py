@@ -19,6 +19,8 @@ class Draw:
     numbers: tuple[int, int, int, int, int, int]
     bonus: int
     first_prize_amount: float
+    second_prize_amount: float
+    third_prize_amount: float
 
 
 def parse_args() -> argparse.Namespace:
@@ -127,6 +129,8 @@ def load_draws(path: str) -> list[Draw]:
                     numbers=numbers,
                     bonus=int(row.get("bonus", 0) or 0),
                     first_prize_amount=float(row.get("first_prize_amount", 0) or 0),
+                    second_prize_amount=float(row.get("second_prize_amount", 0) or 0),
+                    third_prize_amount=float(row.get("third_prize_amount", 0) or 0),
                 )
             )
     return draws
@@ -380,7 +384,11 @@ def evaluate_portfolio_protocol(
             bundle["portfolio"],
             draw.numbers,
             draw.bonus,
-            draw_context={"first_prize_amount": draw.first_prize_amount},
+            draw_context={
+                "first_prize_amount": draw.first_prize_amount,
+                "second_prize_amount": draw.second_prize_amount,
+                "third_prize_amount": draw.third_prize_amount,
+            },
             tier_payouts=prize_config["tier_payouts"],
             ticket_price=prize_config["ticket_price"],
             tier1_estimate=prize_config["tier1_estimate"],

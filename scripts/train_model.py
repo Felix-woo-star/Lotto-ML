@@ -3,6 +3,7 @@
 
 import argparse
 import importlib
+import inspect
 import json
 import os
 import pickle
@@ -62,6 +63,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=42,
         help="난수 시드.",
+    )
+    parser.add_argument(
+        "--train-decay",
+        type=float,
+        default=0.998,
+        help="최근 회차에 더 큰 가중치를 주는 학습 샘플 감쇠율(1.0이면 동일 가중치).",
     )
     parser.add_argument(
         "--in-processed",
@@ -338,6 +345,64 @@ def split_by_draw(
     train_df = df[df["draw_no"].isin(train_draws)].copy()
     test_df = df[df["draw_no"].isin(test_draws)].copy()
     return train_df, test_df, train_draws, test_draws
+
+
+def build_train_sample_weights(train_df: pd.DataFrame, decay: float) -> np.ndarray | None:
+    """회차 recency 기반 샘플 가중치를 만든다."""
+    decay = float(decay)
+    if decay <= 0 or decay > 1 or abs(decay - 1.0) < 1e-12:
+        return None
+    latest_draw = int(train_df["draw_no"].max())
+    distances = latest_draw - train_df["draw_no"].to_numpy(dtype=int)
+    return np.power(decay, distances).astype(float)
+
+
+def fit_accepts_sample_weight(estimator) -> bool:
+    """Estimator fit signature가 sample_weight를 지원하는지 확인한다."""
+    try:
+        params = inspect.signature(estimator.fit).parameters
+    except (TypeError, ValueError):
+        return False
+    return "sample_weight" in params
+
+
+def fit_model(model, train_df: pd.DataFrame, feature_cols: list[str], args: argparse.Namespace) -> dict:
+    """가능한 경우 시간 감쇠 샘플 가중치를 적용해 모델을 학습한다."""
+    sample_weights = build_train_sample_weights(train_df, args.train_decay)
+    fit_summary = {
+        "train_decay": float(args.train_decay),
+        "sample_weighted": False,
+        "sample_weight_min": 1.0,
+        "sample_weight_max": 1.0,
+    }
+    if sample_weights is None:
+        model.fit(train_df[feature_cols], train_df["label"])
+        return fit_summary
+
+    fit_summary["sample_weight_min"] = float(np.min(sample_weights))
+    fit_summary["sample_weight_max"] = float(np.max(sample_weights))
+
+    if isinstance(model, Pipeline):
+        final_step_name, final_estimator = model.steps[-1]
+        if fit_accepts_sample_weight(final_estimator):
+            model.fit(
+                train_df[feature_cols],
+                train_df["label"],
+                **{f"{final_step_name}__sample_weight": sample_weights},
+            )
+            fit_summary["sample_weighted"] = True
+            return fit_summary
+    elif fit_accepts_sample_weight(model):
+        model.fit(
+            train_df[feature_cols],
+            train_df["label"],
+            sample_weight=sample_weights,
+        )
+        fit_summary["sample_weighted"] = True
+        return fit_summary
+
+    model.fit(train_df[feature_cols], train_df["label"])
+    return fit_summary
 
 
 def build_model(args: argparse.Namespace):
@@ -703,11 +768,13 @@ def build_model_params(args: argparse.Namespace) -> dict:
             "gbdt_max_iter": args.gbdt_max_iter,
             "gbdt_learning_rate": args.gbdt_learning_rate,
             "gbdt_max_depth": args.gbdt_max_depth,
+            "train_decay": args.train_decay,
         }
     if args.model in {"randomforest", "extratrees"}:
         return {
             "n_estimators": args.n_estimators,
             "max_depth": args.max_depth,
+            "train_decay": args.train_decay,
         }
     if args.model == "mlp":
         return {
@@ -718,6 +785,7 @@ def build_model_params(args: argparse.Namespace) -> dict:
             "mlp_validation_fraction": args.mlp_validation_fraction,
             "mlp_n_iter_no_change": args.mlp_n_iter_no_change,
             "mlp_early_stopping": args.mlp_early_stopping,
+            "train_decay": args.train_decay,
         }
     if args.model == "lightgbm":
         return {
@@ -726,6 +794,7 @@ def build_model_params(args: argparse.Namespace) -> dict:
             "max_depth": args.max_depth,
             "num_leaves": args.num_leaves,
             "min_data_in_leaf": args.min_data_in_leaf,
+            "train_decay": args.train_decay,
         }
     if args.model == "xgboost":
         return {
@@ -734,14 +803,16 @@ def build_model_params(args: argparse.Namespace) -> dict:
             "max_depth": args.max_depth,
             "xgb_subsample": args.xgb_subsample,
             "xgb_colsample_bytree": args.xgb_colsample_bytree,
+            "train_decay": args.train_decay,
         }
     if args.model == "catboost":
         return {
             "iterations": args.n_estimators,
             "learning_rate": args.learning_rate,
             "depth": args.max_depth,
+            "train_decay": args.train_decay,
         }
-    return {}
+    return {"train_decay": args.train_decay}
 
 
 def main() -> int:
@@ -777,7 +848,7 @@ def main() -> int:
         print(str(exc))
         return 2
 
-    model.fit(train_df[feature_cols], train_df["label"])
+    fit_summary = fit_model(model, train_df, feature_cols, args)
     metrics = evaluate(
         model,
         test_df,
@@ -798,6 +869,8 @@ def main() -> int:
     print(f"- brier: {metrics['brier']:.6f}")
     print(f"- log_loss: {metrics['log_loss']:.6f}")
     print(f"- ece: {metrics['ece']:.6f}")
+    print(f"- train_decay: {fit_summary['train_decay']:.4f}")
+    print(f"- sample_weighted: {fit_summary['sample_weighted']}")
     if "portfolio" in metrics:
         print_portfolio_metrics(metrics["portfolio"], thresholds)
 
@@ -822,6 +895,7 @@ def main() -> int:
             "feature_count": len(feature_cols),
             "model": args.model,
             "model_params": build_model_params(args),
+            "fit_summary": fit_summary,
             "portfolio_config": portfolio_config,
             "prize_config": {
                 "ticket_price": prize_config["ticket_price"],

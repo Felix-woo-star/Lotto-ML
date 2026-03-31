@@ -7,6 +7,7 @@ import json
 import os
 from collections import deque
 from dataclasses import dataclass
+from itertools import combinations
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -124,6 +125,12 @@ def build_feature_rows(
     window_high_totals = {window: 0 for window in windows}
     window_sum_totals = {window: 0 for window in windows}
     window_consecutive_totals = {window: 0 for window in windows}
+    window_bucket_counts = {window: [0, 0, 0, 0] for window in windows}
+    window_mod_counts = {window: [0] * 10 for window in windows}
+    pair_window_counts = {
+        window: [[0] * (NUMBER_MAX + 1) for _ in range(NUMBER_MAX + 1)]
+        for window in windows
+    }
 
     bonus_window_counts = {window: [0] * (NUMBER_MAX + 1) for window in windows}
     bonus_window_queues = {window: deque() for window in windows}
@@ -172,11 +179,12 @@ def build_feature_rows(
             prev_high_count = sum(1 for value in prev_numbers if value > 22)
 
             for number in numbers_range:
+                bucket = ((number - 1) // 15) + 1
                 row = {
                     "draw_no": draw.draw_no,
                     "number": number,
                     "label": 1 if number in labels else 0,
-                    "number_bucket": ((number - 1) // 15) + 1,
+                    "number_bucket": bucket,
                     "number_is_odd": 1 if number % 2 == 1 else 0,
                     "number_is_high": 1 if number > 22 else 0,
                     "number_mod_10": number % 10,
@@ -196,11 +204,31 @@ def build_feature_rows(
                 }
                 for window in windows:
                     freq = window_counts[window][number]
+                    recent_mean_number = window_sum_totals[window] / (window * 6)
+                    pair_values = [
+                        pair_window_counts[window][number][prev_number]
+                        for prev_number in prev_numbers
+                        if prev_number != number
+                    ]
                     row[f"freq_{window}"] = freq
                     row[f"freq_rate_{window}"] = freq / window
+                    row[f"bucket_freq_{window}"] = window_bucket_counts[window][bucket]
+                    row[f"bucket_rate_{window}"] = (
+                        window_bucket_counts[window][bucket] / (window * 6)
+                    )
+                    row[f"mod_freq_{window}"] = window_mod_counts[window][number % 10]
+                    row[f"mod_rate_{window}"] = (
+                        window_mod_counts[window][number % 10] / (window * 6)
+                    )
                     row[f"bonus_freq_{window}"] = bonus_window_counts[window][number]
                     row[f"bonus_freq_rate_{window}"] = (
                         bonus_window_counts[window][number] / window
+                    )
+                    row[f"distance_to_recent_mean_{window}"] = abs(
+                        number - recent_mean_number
+                    )
+                    row[f"recent_mean_gap_signed_{window}"] = (
+                        number - recent_mean_number
                     )
                     row[f"recent_odd_rate_{window}"] = (
                         window_odd_totals[window] / (window * 6)
@@ -211,6 +239,13 @@ def build_feature_rows(
                     row[f"recent_sum_avg_{window}"] = window_sum_totals[window] / window
                     row[f"recent_consecutive_rate_{window}"] = (
                         window_consecutive_totals[window] / window
+                    )
+                    row[f"pair_with_prev_sum_{window}"] = sum(pair_values)
+                    row[f"pair_with_prev_avg_{window}"] = (
+                        sum(pair_values) / len(pair_values) if pair_values else 0.0
+                    )
+                    row[f"pair_with_prev_max_{window}"] = (
+                        max(pair_values) if pair_values else 0
                     )
 
                 last_seen_draw_no = last_seen[number]
@@ -275,6 +310,11 @@ def build_feature_rows(
             )
             for number in draw.numbers:
                 window_counts[window][number] += 1
+                window_bucket_counts[window][((number - 1) // 15) + 1] += 1
+                window_mod_counts[window][number % 10] += 1
+            for left, right in combinations(sorted_numbers, 2):
+                pair_window_counts[window][left][right] += 1
+                pair_window_counts[window][right][left] += 1
             window_odd_totals[window] += odd_count
             window_high_totals[window] += high_count
             window_sum_totals[window] += draw_sum
@@ -289,6 +329,12 @@ def build_feature_rows(
                 ) = queue.popleft()
                 for number in outgoing:
                     window_counts[window][number] -= 1
+                    window_bucket_counts[window][((number - 1) // 15) + 1] -= 1
+                    window_mod_counts[window][number % 10] -= 1
+                outgoing_sorted = sorted(outgoing)
+                for left, right in combinations(outgoing_sorted, 2):
+                    pair_window_counts[window][left][right] -= 1
+                    pair_window_counts[window][right][left] -= 1
                 window_odd_totals[window] -= outgoing_odd
                 window_high_totals[window] -= outgoing_high
                 window_sum_totals[window] -= outgoing_sum
@@ -331,6 +377,14 @@ def build_feature_rows(
                 "number_is_high",
                 "number_mod_10",
             ],
+            "distribution": [
+                "bucket_freq_*",
+                "bucket_rate_*",
+                "mod_freq_*",
+                "mod_rate_*",
+                "distance_to_recent_mean_*",
+                "recent_mean_gap_signed_*",
+            ],
             "recency": ["last_seen_gap", "bonus_last_seen_gap", "recency_inv"],
             "context": [
                 "prev_draw_sum",
@@ -340,6 +394,11 @@ def build_feature_rows(
                 "is_prev_bonus_number",
                 "adjacent_prev_count",
                 "distance_to_prev_min",
+            ],
+            "pairwise": [
+                "pair_with_prev_sum_*",
+                "pair_with_prev_avg_*",
+                "pair_with_prev_max_*",
             ],
         },
     }

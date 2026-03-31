@@ -108,9 +108,11 @@ python scripts/build_features.py
 
 추가 확장 피처:
 - 번호 속성: `number_is_odd`, `number_is_high`, `number_mod_10`
+- 최근 분포 적합도: `bucket_freq_*`, `bucket_rate_*`, `mod_freq_*`, `mod_rate_*`, `distance_to_recent_mean_*`
 - 직전 회차 컨텍스트: `is_prev_draw_number`, `is_prev_bonus_number`, `adjacent_prev_count`
 - 보너스 히스토리: `bonus_freq_*`, `bonus_last_seen_gap`
 - 분포/변화: `recent_odd_rate_*`, `recent_high_rate_*`, `recent_consecutive_rate_*`, `trend_ratio_*`, `freq_rate_diff_*`
+- 번호쌍 구조: `pair_with_prev_sum_*`, `pair_with_prev_avg_*`, `pair_with_prev_max_*`
 
 ### 모델 학습
 
@@ -122,6 +124,7 @@ python scripts/train_model.py
 - `--test-size`: 테스트에 사용할 회차 수 (기본값: 100)
 - `--hit-thresholds`: 적중 기준 (기본값: `1,2,3,4,5`)
 - `--calibration-bins`: ECE 계산 bin 수 (기본값: 10)
+- `--train-decay`: 최근 회차에 더 큰 가중치를 주는 학습 감쇠율 (기본값: `0.998`)
 - `--num-candidates`: 회차당 생성할 후보 조합 수
 - `--portfolio-size`: 최종 포트폴리오 티켓 수
 - `--candidate-pool-size`, `--sampling-temperature`: 후보 생성 설정

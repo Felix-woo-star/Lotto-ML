@@ -55,6 +55,12 @@ def parse_args() -> argparse.Namespace:
         help="난수 시드.",
     )
     parser.add_argument(
+        "--train-decay",
+        type=float,
+        default=0.998,
+        help="최근 회차에 더 큰 가중치를 주는 학습 샘플 감쇠율(1.0이면 동일 가중치).",
+    )
+    parser.add_argument(
         "--in-processed",
         default="data/processed/lotto_draws.csv",
         help="보너스 번호/수익 평가용 정제 CSV 경로.",
@@ -228,6 +234,7 @@ def build_model_namespace(args: argparse.Namespace, model_name: str) -> argparse
     return argparse.Namespace(
         model=model_name,
         seed=args.seed,
+        train_decay=args.train_decay,
         gbdt_max_iter=args.gbdt_max_iter,
         gbdt_learning_rate=args.gbdt_learning_rate,
         gbdt_max_depth=args.gbdt_max_depth,
@@ -542,7 +549,7 @@ def main() -> int:
                 active_models.remove(model_name)
                 continue
 
-            model.fit(train_df[feature_cols], train_df["label"])
+            tm.fit_model(model, train_df, feature_cols, model_args)
             proba = model.predict_proba(test_df[feature_cols])[:, 1]
             fold_probas[model_name] = np.asarray(proba, dtype=float)
             metrics = tm.evaluate_from_proba(

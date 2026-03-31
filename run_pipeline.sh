@@ -11,6 +11,7 @@ TEST_SIZE=100
 TRAIN_END=""
 BASELINE_PROTOCOL="single_top6"
 FETCH_ENGINE="playwright"
+TRAIN_DECAY=0.998
 # catboost는 Python 3.14 환경에서 설치 호환 이슈가 있어 기본 목록에서 제외한다.
 MODEL_LIST="logreg,gbdt,randomforest,extratrees,mlp,lightgbm,xgboost"
 NUM_CANDIDATES=256
@@ -45,6 +46,7 @@ Options:
   --fetch-engine <engine>           수집 엔진: playwright|urllib (기본값: playwright).
   --test-size <n>                   평가 테스트 회차 수 (기본값: 100).
   --train-end <draw_no>             학습 종료 회차(지정 시 --test-size 무시).
+  --train-decay <v>                 최근 회차 가중 학습 감쇠율(기본값: 0.998).
   --baseline-protocol <mode>        baseline 평가 방식: single_top6|max_of_candidates|portfolio
   --models <csv>                    학습/검증 모델 목록(쉼표 구분).
   --num-candidates <n>              회차당 생성할 후보 조합 수.
@@ -92,6 +94,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --train-end)
       TRAIN_END="${2:-}"
+      shift 2
+      ;;
+    --train-decay)
+      TRAIN_DECAY="${2:-}"
       shift 2
       ;;
     --baseline-protocol)
@@ -317,6 +323,7 @@ for model in "${REQUESTED_MODELS[@]}"; do
       --max-depth "$LGBM_MAX_DEPTH" \
       --min-data-in-leaf "$LGBM_MIN_DATA_IN_LEAF" \
       --calibration-bins "$CALIBRATION_BINS" \
+      --train-decay "$TRAIN_DECAY" \
       --num-candidates "$NUM_CANDIDATES" \
       --portfolio-size "$PORTFOLIO_SIZE" \
       --candidate-pool-size "$CANDIDATE_POOL_SIZE" \
@@ -331,6 +338,7 @@ for model in "${REQUESTED_MODELS[@]}"; do
     "${PYTHON_RUN[@]}" scripts/train_model.py \
       "${SPLIT_ARGS[@]}" \
       --calibration-bins "$CALIBRATION_BINS" \
+      --train-decay "$TRAIN_DECAY" \
       --num-candidates "$NUM_CANDIDATES" \
       --portfolio-size "$PORTFOLIO_SIZE" \
       --candidate-pool-size "$CANDIDATE_POOL_SIZE" \
@@ -377,6 +385,7 @@ run_step "롤링 검증 (rolling_validate)" \
   --fold-step-size "$ROLLING_FOLD_STEP_SIZE" \
   --max-folds "$ROLLING_MAX_FOLDS" \
   --calibration-bins "$CALIBRATION_BINS" \
+  --train-decay "$TRAIN_DECAY" \
   --num-candidates "$NUM_CANDIDATES" \
   --portfolio-size "$PORTFOLIO_SIZE" \
   --candidate-pool-size "$CANDIDATE_POOL_SIZE" \

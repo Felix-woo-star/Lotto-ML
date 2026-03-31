@@ -271,3 +271,9 @@ python scripts/tune_xgboost.py
 - `reports/rolling_validation.md` (롤링 백테스트 리포트)
 - `reports/predictions.json`, `reports/predictions.csv` (번호별 확률/랭킹)
 - `reports/prediction_portfolio.csv` (최종 포트폴리오 티켓)
+
+실행 종료 후 터미널에도 다음 요약이 함께 출력됩니다:
+- 베이스라인 핵심 지표
+- 최고 성능 모델 요약
+- 롤링 검증 우승 모델
+- 다음 회차 상위 번호와 포트폴리오 일부 티켓

@@ -412,6 +412,13 @@ run_step "다음 회차 예측 (predict_next)" \
   --out-csv reports/predictions.csv \
   --out-portfolio-csv reports/prediction_portfolio.csv
 
+run_step "결과 요약 (print_pipeline_summary)" \
+  "${PYTHON_RUN[@]}" scripts/print_pipeline_summary.py \
+  --baseline-json reports/baseline.json \
+  --model-jsons "$MODEL_JSON_ARG" \
+  --rolling-json reports/rolling_validation.json \
+  --predictions-json reports/predictions.json
+
 echo
 if [[ ${#FAILED_MODELS[@]} -gt 0 ]]; then
   echo "제외된 모델: $(join_by_comma "${FAILED_MODELS[@]}")"

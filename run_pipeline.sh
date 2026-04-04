@@ -34,6 +34,8 @@ LGBM_MIN_DATA_IN_LEAF=10
 
 RUN_LGBM_TUNING=0
 RUN_XGB_TUNING=0
+TUNING_OBJECTIVE="portfolio_hit"
+TARGET_THRESHOLD=3
 
 usage() {
   cat <<'EOF'
@@ -66,6 +68,8 @@ Options:
   --lgbm-min-data-in-leaf <n>       LightGBM min_data_in_leaf (기본값: 10).
   --run-lgbm-tuning                 LightGBM 튜닝 스크립트를 실행합니다.
   --run-xgb-tuning                  XGBoost 튜닝 스크립트를 실행합니다.
+  --tuning-objective <mode>         튜닝 목표: portfolio_hit|average_hits|balanced
+  --target-threshold <k>            튜닝 시 우선할 Hit@K 기준(기본값: 3).
   -h, --help                        도움말 출력.
 EOF
 }
@@ -176,6 +180,14 @@ while [[ $# -gt 0 ]]; do
       RUN_XGB_TUNING=1
       shift
       ;;
+    --tuning-objective)
+      TUNING_OBJECTIVE="${2:-}"
+      shift 2
+      ;;
+    --target-threshold)
+      TARGET_THRESHOLD="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -278,12 +290,30 @@ run_step "피처 생성 (build_features)" "${PYTHON_RUN[@]}" scripts/build_featu
 
 if [[ "$RUN_LGBM_TUNING" -eq 1 ]]; then
   run_step "튜닝 (tune_lightgbm)" \
-    "${PYTHON_RUN[@]}" scripts/tune_lightgbm.py
+    "${PYTHON_RUN[@]}" scripts/tune_lightgbm.py \
+    --train-decay "$TRAIN_DECAY" \
+    --tuning-objective "$TUNING_OBJECTIVE" \
+    --target-threshold "$TARGET_THRESHOLD" \
+    --num-candidates "$NUM_CANDIDATES" \
+    --portfolio-size "$PORTFOLIO_SIZE" \
+    --candidate-pool-size "$CANDIDATE_POOL_SIZE" \
+    --sampling-temperature "$SAMPLING_TEMPERATURE" \
+    --overlap-penalty "$OVERLAP_PENALTY" \
+    --unique-bonus "$UNIQUE_BONUS"
 fi
 
 if [[ "$RUN_XGB_TUNING" -eq 1 ]]; then
   run_step "튜닝 (tune_xgboost)" \
-    "${PYTHON_RUN[@]}" scripts/tune_xgboost.py
+    "${PYTHON_RUN[@]}" scripts/tune_xgboost.py \
+    --train-decay "$TRAIN_DECAY" \
+    --tuning-objective "$TUNING_OBJECTIVE" \
+    --target-threshold "$TARGET_THRESHOLD" \
+    --num-candidates "$NUM_CANDIDATES" \
+    --portfolio-size "$PORTFOLIO_SIZE" \
+    --candidate-pool-size "$CANDIDATE_POOL_SIZE" \
+    --sampling-temperature "$SAMPLING_TEMPERATURE" \
+    --overlap-penalty "$OVERLAP_PENALTY" \
+    --unique-bonus "$UNIQUE_BONUS"
 fi
 
 run_step "베이스라인 평가 (evaluate_baseline)" \

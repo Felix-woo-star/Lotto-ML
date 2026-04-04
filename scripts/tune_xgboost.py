@@ -23,7 +23,18 @@ def parse_args() -> argparse.Namespace:
         default="1,2,3,4,5",
         help="Top-K 적중 기준(쉼표 구분).",
     )
+    parser.add_argument(
+        "--in-processed",
+        default="data/processed/lotto_draws.csv",
+        help="보너스 번호/수익 평가용 정제 CSV 경로.",
+    )
     parser.add_argument("--seed", type=int, default=42, help="난수 시드.")
+    parser.add_argument(
+        "--train-decay",
+        type=float,
+        default=0.998,
+        help="최근 회차에 더 큰 가중치를 주는 학습 샘플 감쇠율.",
+    )
     parser.add_argument(
         "--calibration-bins",
         type=int,
@@ -53,6 +64,50 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=4,
         help="최근 기준 최대 폴드 수.",
+    )
+    parser.add_argument(
+        "--tuning-objective",
+        choices=["portfolio_hit", "average_hits", "balanced"],
+        default="portfolio_hit",
+        help="하이퍼파라미터 탐색 목표.",
+    )
+    parser.add_argument(
+        "--target-threshold",
+        type=int,
+        default=3,
+        help="portfolio_hit/balanced 목표에서 우선할 Hit@K 기준.",
+    )
+    parser.add_argument("--num-candidates", type=int, default=256)
+    parser.add_argument("--portfolio-size", type=int, default=12)
+    parser.add_argument("--candidate-pool-size", type=int, default=18)
+    parser.add_argument("--sampling-temperature", type=float, default=0.9)
+    parser.add_argument("--overlap-penalty", type=float, default=0.18)
+    parser.add_argument("--unique-bonus", type=float, default=0.035)
+    parser.add_argument("--ticket-price", type=float, default=tm.lp.DEFAULT_TICKET_PRICE)
+    parser.add_argument(
+        "--tier1-payout-estimate",
+        type=float,
+        default=tm.lp.DEFAULT_TIER1_ESTIMATE,
+    )
+    parser.add_argument(
+        "--tier2-payout",
+        type=float,
+        default=tm.lp.DEFAULT_TIER_PAYOUTS[2],
+    )
+    parser.add_argument(
+        "--tier3-payout",
+        type=float,
+        default=tm.lp.DEFAULT_TIER_PAYOUTS[3],
+    )
+    parser.add_argument(
+        "--tier4-payout",
+        type=float,
+        default=tm.lp.DEFAULT_TIER_PAYOUTS[4],
+    )
+    parser.add_argument(
+        "--tier5-payout",
+        type=float,
+        default=tm.lp.DEFAULT_TIER_PAYOUTS[5],
     )
     parser.add_argument(
         "--grid-n-estimators",
@@ -148,24 +203,54 @@ def avg(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
-def score_metrics(metrics: dict, thresholds: list[int]) -> float:
-    """모델 우열 판정을 위한 종합 점수를 계산한다."""
-    score = float(metrics.get("average_hits", 0.0))
+def score_metrics(
+    metrics: dict,
+    thresholds: list[int],
+    *,
+    objective: str,
+    target_threshold: int,
+) -> float:
+    """적중률 중심 하이퍼파라미터 탐색 점수를 계산한다."""
     hit_rates = metrics.get("hit_rates", {})
-    weight_by_threshold = {1: 0.03, 2: 0.07, 3: 0.20, 4: 0.05, 5: 0.02}
+    portfolio = metrics.get("portfolio", {})
+    portfolio_hit_rates = portfolio.get("best_hit_rates", {})
+    portfolio_target = float(
+        portfolio_hit_rates.get(
+            target_threshold,
+            portfolio_hit_rates.get(str(target_threshold), 0.0),
+        )
+    )
+    hit_target = float(
+        hit_rates.get(target_threshold, hit_rates.get(str(target_threshold), 0.0))
+    )
+    portfolio_best_hits = float(portfolio.get("average_best_hits", 0.0))
+    average_hits = float(metrics.get("average_hits", 0.0))
+    roi = float(portfolio.get("roi", 0.0))
+
+    if objective == "portfolio_hit":
+        score = portfolio_target * 100.0
+        score += portfolio_best_hits * 10.0
+        score += average_hits * 4.0
+        score += hit_target * 2.0
+        score += roi * 0.01
+        return float(score)
+
+    if objective == "average_hits":
+        score = average_hits * 100.0
+        score += hit_target * 10.0
+        score += portfolio_best_hits * 5.0
+        score += portfolio_target * 2.0
+        return float(score)
+
+    score = portfolio_target * 60.0
+    score += portfolio_best_hits * 20.0
+    score += average_hits * 12.0
+    score += hit_target * 4.0
+    score += roi * 0.01
     for threshold in thresholds:
-        value = hit_rates.get(threshold)
-        if value is None:
-            value = hit_rates.get(str(threshold), 0.0)
-        score += float(value) * weight_by_threshold.get(threshold, 0.01)
-    score += float(metrics.get("mrr", 0.0)) * 0.15
-    mean_min_rank = float(metrics.get("mean_min_rank", 0.0))
-    if mean_min_rank > 0:
-        score += (1.0 / mean_min_rank) * 0.40
-    score -= float(metrics.get("brier", 0.0)) * 0.10
-    score -= float(metrics.get("log_loss", 0.0)) * 0.05
-    score -= float(metrics.get("ece", 0.0)) * 0.10
-    return score
+        value = hit_rates.get(threshold, hit_rates.get(str(threshold), 0.0))
+        score += float(value) * 0.1
+    return float(score)
 
 
 def evaluate_combo(
@@ -180,6 +265,9 @@ def evaluate_combo(
     learning_rate: float,
     subsample: float,
     colsample_bytree: float,
+    draw_contexts: dict[int, dict],
+    portfolio_config: dict,
+    prize_config: dict,
 ) -> dict:
     """단일 하이퍼파라미터 조합을 롤링 폴드로 평가한다."""
     fold_metrics = []
@@ -190,6 +278,7 @@ def evaluate_combo(
         model_args = argparse.Namespace(
             model="xgboost",
             seed=args.seed,
+            train_decay=args.train_decay,
             gbdt_max_iter=200,
             gbdt_learning_rate=0.1,
             gbdt_max_depth=3,
@@ -205,13 +294,16 @@ def evaluate_combo(
         )
 
         model = tm.build_model(model_args)
-        model.fit(train_df[feature_cols], train_df["label"])
+        tm.fit_model(model, train_df, feature_cols, model_args)
         metrics = tm.evaluate(
             model,
             test_df,
             feature_cols,
             thresholds,
             calibration_bins=args.calibration_bins,
+            draw_contexts=draw_contexts,
+            portfolio_config=portfolio_config,
+            prize_config=prize_config,
         )
         fold_metrics.append(metrics)
 
@@ -230,6 +322,23 @@ def evaluate_combo(
         "ece": avg([float(item.get("ece", 0.0)) for item in fold_metrics]),
         "folds": len(fold_metrics),
     }
+    portfolio_metrics = [item["portfolio"] for item in fold_metrics if "portfolio" in item]
+    if portfolio_metrics:
+        avg_metrics["portfolio"] = {
+            "average_best_hits": avg(
+                [float(item["average_best_hits"]) for item in portfolio_metrics]
+            ),
+            "best_hit_rates": {
+                threshold: avg(
+                    [float(item["best_hit_rates"][threshold]) for item in portfolio_metrics]
+                )
+                for threshold in thresholds
+            },
+            "expected_profit": avg(
+                [float(item["expected_profit"]) for item in portfolio_metrics]
+            ),
+            "roi": avg([float(item["roi"]) for item in portfolio_metrics]),
+        }
 
     return {
         "params": {
@@ -238,9 +347,15 @@ def evaluate_combo(
             "learning_rate": learning_rate,
             "subsample": subsample,
             "colsample_bytree": colsample_bytree,
+            "train_decay": args.train_decay,
         },
         "metrics": avg_metrics,
-        "score": score_metrics(avg_metrics, thresholds),
+        "score": score_metrics(
+            avg_metrics,
+            thresholds,
+            objective=args.tuning_objective,
+            target_threshold=args.target_threshold,
+        ),
     }
 
 
@@ -258,6 +373,8 @@ def render_markdown(payload: dict, thresholds: list[int]) -> str:
         f"- 폴드 수: {config['folds']}",
         f"- 탐색 조합 수: {config['trial_count']}",
         f"- 탐색 파라미터: n_estimators, max_depth, learning_rate, subsample, colsample_bytree",
+        f"- 튜닝 목표: {config['tuning_objective']}",
+        f"- 목표 Hit@K: {config['target_threshold']}",
         "",
         "## 최적 파라미터",
         f"- n_estimators: {best['params']['n_estimators']}",
@@ -269,16 +386,29 @@ def render_markdown(payload: dict, thresholds: list[int]) -> str:
         f"- MRR: {best['metrics']['mrr']:.4f}",
         f"- Brier: {best['metrics']['brier']:.6f}",
         f"- ECE: {best['metrics']['ece']:.6f}",
-        f"- 종합점수: {best['score']:.4f}",
+        f"- 튜닝점수: {best['score']:.4f}",
     ]
     for threshold in thresholds:
         lines.append(f"- Hit@{threshold}: {best['metrics']['hit_rates'][threshold]:.4f}")
+    if "portfolio" in best["metrics"]:
+        lines.extend(
+            [
+                f"- portfolio.average_best_hits: {best['metrics']['portfolio']['average_best_hits']:.4f}",
+                f"- portfolio.Hit@{config['target_threshold']}: "
+                f"{best['metrics']['portfolio']['best_hit_rates'][config['target_threshold']]:.4f}",
+                f"- portfolio.expected_profit: {best['metrics']['portfolio']['expected_profit']:.2f}",
+                f"- portfolio.roi: {best['metrics']['portfolio']['roi']:.6f}",
+            ]
+        )
 
     lines.extend(["", "## 상위 결과", ""])
     headers = (
-        ["순위", "종합점수", "average_hits"]
+        ["순위", "튜닝점수", "average_hits"]
         + [f"Hit@{t}" for t in thresholds]
         + [
+            "portfolio.avg_best_hits",
+            f"portfolio.Hit@{config['target_threshold']}",
+            "portfolio.roi",
             "MRR",
             "Brier",
             "ECE",
@@ -300,8 +430,12 @@ def render_markdown(payload: dict, thresholds: list[int]) -> str:
         ]
         for threshold in thresholds:
             row.append(f"{trial['metrics']['hit_rates'][threshold]:.4f}")
+        portfolio = trial["metrics"].get("portfolio", {})
         row.extend(
             [
+                f"{float(portfolio.get('average_best_hits', 0.0)):.4f}",
+                f"{float(portfolio.get('best_hit_rates', {}).get(config['target_threshold'], 0.0)):.4f}",
+                f"{float(portfolio.get('roi', 0.0)):.6f}",
                 f"{trial['metrics']['mrr']:.4f}",
                 f"{trial['metrics']['brier']:.6f}",
                 f"{trial['metrics']['ece']:.6f}",
@@ -327,6 +461,9 @@ def main() -> int:
     thresholds = parse_thresholds(args.hit_thresholds)
     df = pd.read_parquet(args.in_parquet).fillna(0)
     feature_cols = [col for col in df.columns if col not in ("label", "draw_no")]
+    draw_contexts = tm.lp.load_draw_contexts(args.in_processed)
+    portfolio_config = tm.build_portfolio_config(args)
+    prize_config = tm.build_prize_config(args)
 
     draws = sorted(int(value) for value in df["draw_no"].unique())
     folds = build_folds(draws, args)
@@ -371,6 +508,9 @@ def main() -> int:
                 learning_rate=learning_rate,
                 subsample=subsample,
                 colsample_bytree=colsample_bytree,
+                draw_contexts=draw_contexts,
+                portfolio_config=portfolio_config,
+                prize_config=prize_config,
             )
         except tm.OptionalDependencyError as exc:
             print(str(exc))
@@ -378,10 +518,21 @@ def main() -> int:
         trials.append(result)
         print(
             f"[{idx}/{len(combos)}] score={result['score']:.4f}, "
-            f"avg_hits={result['metrics']['average_hits']:.4f}, params={result['params']}"
+            f"avg_hits={result['metrics']['average_hits']:.4f}, "
+            f"portfolio_hit@{args.target_threshold}="
+            f"{float(result['metrics'].get('portfolio', {}).get('best_hit_rates', {}).get(args.target_threshold, 0.0)):.4f}, "
+            f"params={result['params']}"
         )
 
-    trials.sort(key=lambda item: float(item["score"]), reverse=True)
+    trials.sort(
+        key=lambda item: (
+            float(item["score"]),
+            float(item["metrics"].get("portfolio", {}).get("best_hit_rates", {}).get(args.target_threshold, 0.0)),
+            float(item["metrics"].get("portfolio", {}).get("average_best_hits", 0.0)),
+            float(item["metrics"]["average_hits"]),
+        ),
+        reverse=True,
+    )
     best = trials[0]
 
     payload = {
@@ -406,6 +557,10 @@ def main() -> int:
                 "subsample": grid_subsample,
                 "colsample_bytree": grid_colsample_bytree,
             },
+            "train_decay": args.train_decay,
+            "tuning_objective": args.tuning_objective,
+            "target_threshold": args.target_threshold,
+            "portfolio_config": portfolio_config,
         },
         "best": best,
         "trials": trials,

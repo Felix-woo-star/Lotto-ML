@@ -220,11 +220,23 @@ python scripts/rolling_validate.py --models logreg,gbdt,randomforest,extratrees,
 python scripts/tune_lightgbm.py
 ```
 
+기본 동작:
+- `portfolio_hit` 목표로 튜닝합니다.
+- 즉 단일 `average_hits`보다 `portfolio.best_hit_rates[3]`, `portfolio.average_best_hits`, `roi`를 더 우선합니다.
+- `--train-decay`와 포트폴리오 생성 설정을 그대로 반영합니다.
+
 튜닝 대상:
 - `n_estimators`
 - `num_leaves`
 - `max_depth`
 - `min_data_in_leaf`
+
+주요 옵션:
+- `--tuning-objective portfolio_hit|average_hits|balanced`
+- `--target-threshold 3`
+- `--train-decay 0.998`
+- `--num-candidates`, `--portfolio-size`, `--candidate-pool-size`
+- `--sampling-temperature`, `--overlap-penalty`, `--unique-bonus`
 
 출력:
 - `reports/tuning_lightgbm.json`
@@ -235,6 +247,10 @@ python scripts/tune_lightgbm.py
 ```bash
 python scripts/tune_xgboost.py
 ```
+
+기본 동작:
+- `portfolio_hit` 목표로 튜닝합니다.
+- 포트폴리오 적중과 수익성을 같이 보면서 `learning_rate`, `subsample`, `colsample_bytree`까지 탐색합니다.
 
 튜닝 대상:
 - `n_estimators`
@@ -262,6 +278,7 @@ python scripts/tune_xgboost.py
 ./run_pipeline.sh --models logreg,gbdt,randomforest,extratrees,mlp
 ./run_pipeline.sh --lgbm-n-estimators 500 --lgbm-num-leaves 63 --lgbm-max-depth 8 --lgbm-min-data-in-leaf 10
 ./run_pipeline.sh --run-lgbm-tuning --run-xgb-tuning
+./run_pipeline.sh --run-lgbm-tuning --tuning-objective portfolio_hit --target-threshold 3
 ./run_pipeline.sh --calibration-bins 15
 ./run_pipeline.sh --baseline-protocol portfolio --num-candidates 256 --portfolio-size 12
 ```

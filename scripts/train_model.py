@@ -712,23 +712,23 @@ def build_prize_config_from_values() -> dict:
 
 def print_portfolio_metrics(portfolio_metrics: dict, thresholds: list[int]) -> None:
     """Print a concise portfolio backtest summary."""
-    print("Portfolio metrics")
-    print(f"- portfolio_size: {portfolio_metrics['portfolio_size']}")
-    print(f"- average_best_hits: {portfolio_metrics['average_best_hits']:.4f}")
+    print("포트폴리오 지표")
+    print(f"- 포트폴리오 크기: {portfolio_metrics['portfolio_size']}")
+    print(f"- 평균 최고 적중 수: {portfolio_metrics['average_best_hits']:.4f}")
     for threshold in thresholds:
         value = portfolio_metrics["best_hit_rates"][threshold]
-        print(f"- portfolio_hit_rate_{threshold}: {value:.4f}")
-    print(f"- average_unique_numbers: {portfolio_metrics['average_unique_numbers']:.4f}")
+        print(f"- 포트폴리오 상위 {threshold}개 적중률: {value:.4f}")
+    print(f"- 평균 고유 번호 수: {portfolio_metrics['average_unique_numbers']:.4f}")
     print(
-        f"- average_pairwise_overlap: "
+        f"- 평균 티켓 간 중복도: "
         f"{portfolio_metrics['average_pairwise_overlap']:.4f}"
     )
-    print(f"- expected_payout: {portfolio_metrics['expected_payout']:.2f}")
-    print(f"- expected_profit: {portfolio_metrics['expected_profit']:.2f}")
-    print(f"- roi: {portfolio_metrics['roi']:.6f}")
+    print(f"- 기대 당첨금: {portfolio_metrics['expected_payout']:.2f}")
+    print(f"- 기대 수익: {portfolio_metrics['expected_profit']:.2f}")
+    print(f"- 수익률(ROI): {portfolio_metrics['roi']:.6f}")
     for tier in range(1, 6):
         print(
-            f"- tier_{tier}_hit_rate: "
+            f"- {tier}등 적중률: "
             f"{portfolio_metrics['tier_hit_rates'][tier]:.6f}"
         )
 
@@ -819,10 +819,10 @@ def main() -> int:
     """CLI 실행 진입점."""
     args = parse_args()
     if not os.path.exists(args.in_parquet):
-        print(f"Missing input file: {args.in_parquet}")
+        print(f"입력 파일이 없습니다: {args.in_parquet}")
         return 1
     if args.portfolio_size > 0 and not os.path.exists(args.in_processed):
-        print(f"Missing processed draw file: {args.in_processed}")
+        print(f"정제 데이터 파일이 없습니다: {args.in_processed}")
         return 1
 
     df = pd.read_parquet(args.in_parquet).fillna(0)
@@ -860,17 +860,17 @@ def main() -> int:
         prize_config=prize_config,
     )
 
-    print("Model metrics")
-    print(f"- average_hits: {metrics['average_hits']:.4f}")
+    print("모델 지표")
+    print(f"- 평균 적중 수: {metrics['average_hits']:.4f}")
     for threshold in thresholds:
-        print(f"- hit_rate_{threshold}: {metrics['hit_rates'][threshold]:.4f}")
-    print(f"- mrr: {metrics['mrr']:.4f}")
-    print(f"- mean_min_rank: {metrics['mean_min_rank']:.4f}")
-    print(f"- brier: {metrics['brier']:.6f}")
-    print(f"- log_loss: {metrics['log_loss']:.6f}")
-    print(f"- ece: {metrics['ece']:.6f}")
-    print(f"- train_decay: {fit_summary['train_decay']:.4f}")
-    print(f"- sample_weighted: {fit_summary['sample_weighted']}")
+        print(f"- 상위 {threshold}개 적중률: {metrics['hit_rates'][threshold]:.4f}")
+    print(f"- MRR: {metrics['mrr']:.4f}")
+    print(f"- 평균 최소 순위: {metrics['mean_min_rank']:.4f}")
+    print(f"- Brier 점수: {metrics['brier']:.6f}")
+    print(f"- Log Loss: {metrics['log_loss']:.6f}")
+    print(f"- ECE: {metrics['ece']:.6f}")
+    print(f"- 학습 감쇠율: {fit_summary['train_decay']:.4f}")
+    print(f"- 샘플 가중치 사용: {fit_summary['sample_weighted']}")
     if "portfolio" in metrics:
         print_portfolio_metrics(metrics["portfolio"], thresholds)
 
@@ -878,7 +878,7 @@ def main() -> int:
         ensure_parent_dir(args.out_model)
         with open(args.out_model, "wb") as handle:
             pickle.dump(model, handle)
-        print(f"Saved model to {args.out_model}")
+        print(f"모델을 저장했습니다: {args.out_model}")
 
     if args.out_json or args.out_csv:
         config = {
@@ -907,7 +907,7 @@ def main() -> int:
         payload = {"config": config, "metrics": metrics}
         if args.out_json:
             write_json(args.out_json, payload)
-            print(f"Saved JSON metrics to {args.out_json}")
+            print(f"JSON 지표를 저장했습니다: {args.out_json}")
 
         if args.out_csv:
             row = {"metric_type": "model", "average_hits": metrics["average_hits"]}
@@ -932,7 +932,7 @@ def main() -> int:
             row.update(config)
             fieldnames = list(row.keys())
             write_csv(args.out_csv, [row], fieldnames)
-            print(f"Saved CSV metrics to {args.out_csv}")
+            print(f"CSV 지표를 저장했습니다: {args.out_csv}")
 
     return 0
 

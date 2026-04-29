@@ -133,7 +133,7 @@ def main() -> int:
     """CLI 실행 진입점."""
     args = parse_args()
     if not os.path.exists(args.in_raw):
-        print(f"Missing input file: {args.in_raw}")
+        print(f"입력 파일이 없습니다: {args.in_raw}")
         return 1
 
     seen = set()
@@ -166,11 +166,11 @@ def main() -> int:
         min_no = rows[0]["draw_no"]
         max_no = rows[-1]["draw_no"]
         print(
-            f"Processed {len(rows)} draws ({min_no}..{max_no}). "
-            f"Invalid: {invalid}, duplicates: {duplicates}."
+            f"{len(rows)}개 회차를 처리했습니다 ({min_no}..{max_no}). "
+            f"잘못된 행: {invalid}, 중복 행: {duplicates}."
         )
     else:
-        print(f"No valid rows found. Invalid: {invalid}, duplicates: {duplicates}.")
+        print(f"유효한 행이 없습니다. 잘못된 행: {invalid}, 중복 행: {duplicates}.")
     return 0
 
 

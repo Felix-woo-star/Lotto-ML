@@ -420,7 +420,7 @@ def write_parquet(path: str, rows: list[dict]) -> None:
 def main() -> int:
     args = parse_args()
     if not os.path.exists(args.in_processed):
-        print(f"Missing input file: {args.in_processed}")
+        print(f"입력 파일이 없습니다: {args.in_processed}")
         return 1
 
     windows = normalize_windows(parse_int_list(args.windows))
@@ -439,7 +439,7 @@ def main() -> int:
     )
 
     if not rows:
-        print("No feature rows were generated. Check min-history and input size.")
+        print("생성된 피처 행이 없습니다. min-history와 입력 데이터 크기를 확인하세요.")
         return 1
 
     write_parquet(args.out_parquet, rows)
@@ -455,7 +455,7 @@ def main() -> int:
             "stats": stats,
         },
     )
-    print(f"Wrote {len(rows)} rows to {args.out_parquet}")
+    print(f"피처 {len(rows)}행을 저장했습니다: {args.out_parquet}")
     return 0
 
 

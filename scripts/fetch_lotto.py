@@ -774,8 +774,8 @@ def fetch_with_fallback(draw_no: int, primary_fetch_fn, fallback_fetch_fn=None):
         if fallback_fetch_fn is None:
             raise
         print(
-            f"Warning: primary fetch failed for draw {draw_no}; "
-            f"retrying with urllib fallback: {primary_err}"
+            f"경고: 회차 {draw_no}의 기본 수집이 실패했습니다. "
+            f"urllib 폴백으로 다시 시도합니다: {primary_err}"
         )
         try:
             return fallback_fetch_fn(draw_no)
@@ -795,10 +795,10 @@ def main() -> int:
     start = args.start
     if existing and start <= max_existing:
         start = max_existing + 1
-        print(f"Existing data up to draw {max_existing}; starting from draw {start}.")
+        print(f"기존 데이터는 {max_existing}회차까지 있습니다. {start}회차부터 수집합니다.")
 
     if args.end is not None and start > args.end:
-        print("No new draws to fetch.")
+        print("새로 수집할 회차가 없습니다.")
         return 0
 
     os.makedirs(os.path.dirname(args.out_raw) or ".", exist_ok=True)
@@ -824,18 +824,18 @@ def main() -> int:
         fallback_fetch_fn = build_fallback_fetch_fn(args)
         if backfill_draws:
             print(
-                f"Backfilling prize details for {len(backfill_draws)} existing draws."
+                f"기존 {len(backfill_draws)}개 회차의 당첨금 상세 정보를 보강합니다."
             )
         for index, draw_no in enumerate(backfill_draws, start=1):
             if index == 1 or index == len(backfill_draws) or index % 25 == 0:
-                print(f"Backfill progress: {index}/{len(backfill_draws)} (draw {draw_no})")
+                print(f"보강 진행률: {index}/{len(backfill_draws)} (회차 {draw_no})")
             try:
                 data = fetch_with_fallback(draw_no, fetch_fn, fallback_fetch_fn)
             except RuntimeError as err:
                 if is_soft_no_data_error(err):
                     data = None
                 else:
-                    print(f"Warning: prize backfill failed for draw {draw_no}: {err}")
+                    print(f"경고: {draw_no}회차 당첨금 보강에 실패했습니다: {err}")
                     failed_backfills += 1
                     continue
             if data is None:
@@ -860,10 +860,10 @@ def main() -> int:
                 if is_soft_no_data_error(err):
                     data = None
                 else:
-                    print(f"Warning: fetch failed for draw {draw_no}: {err}")
+                    print(f"경고: {draw_no}회차 수집에 실패했습니다: {err}")
                     print(
-                        "Stopping safely without appending new rows. "
-                        "Check network/WAF and try again."
+                        "새 행을 추가하지 않고 안전하게 중단합니다. "
+                        "네트워크/WAF 상태를 확인한 뒤 다시 시도하세요."
                     )
                     break
             if data is None:
@@ -877,17 +877,17 @@ def main() -> int:
                             known = None
                         if known is None:
                             print(
-                                "Warning: data source validation failed. "
-                                f"draw {draw_no - 1} could not be verified."
+                                "경고: 데이터 소스 검증에 실패했습니다. "
+                                f"{draw_no - 1}회차를 확인할 수 없습니다."
                             )
                             print(
-                                "Stopping safely without appending new rows. "
-                                "Check network/WAF and try again."
+                                "새 행을 추가하지 않고 안전하게 중단합니다. "
+                                "네트워크/WAF 상태를 확인한 뒤 다시 시도하세요."
                             )
                             break
-                    print(f"No data for draw {draw_no}; assuming latest draw.")
+                    print(f"{draw_no}회차 데이터가 없어 최신 회차로 간주합니다.")
                 else:
-                    print(f"No data for draw {draw_no}; stopping.")
+                    print(f"{draw_no}회차 데이터가 없어 중단합니다.")
                 break
 
             rows_by_draw[draw_no] = normalize_record(data)
@@ -908,13 +908,13 @@ def main() -> int:
                 writer.writerow(rows_by_draw[draw_no])
 
     print(
-        f"Fetched {fetched} new draws into {args.out_raw}. "
-        f"Backfilled {updated_existing} existing draws."
+        f"새 회차 {fetched}개를 수집했습니다: {args.out_raw}. "
+        f"기존 회차 {updated_existing}개를 보강했습니다."
     )
     if failed_backfills:
         print(
-            f"Skipped {failed_backfills} backfill draws due to repeated fetch errors. "
-            "You can retry later with `--fetch-engine urllib` if needed."
+            f"반복 수집 오류로 {failed_backfills}개 회차 보강을 건너뛰었습니다. "
+            "필요하면 나중에 `--fetch-engine urllib`로 다시 시도하세요."
         )
     return 0
 

@@ -122,14 +122,14 @@ def print_baseline_summary(payload: dict | None, thresholds: list[int]) -> None:
     metrics = payload.get("metrics", {}).get("baseline", {})
     if not metrics:
         return
-    print("Baseline")
-    print(f"- average_hits: {metric_value(metrics, 'average_hits'):.4f}")
+    print("베이스라인")
+    print(f"- 평균 적중 수: {metric_value(metrics, 'average_hits'):.4f}")
     if "portfolio" in metrics:
-        print(f"- portfolio_best_hits: {portfolio_value(metrics, 'average_best_hits'):.4f}")
-        print(f"- portfolio_roi: {portfolio_value(metrics, 'roi'):.6f}")
+        print(f"- 포트폴리오 최고 적중 수: {portfolio_value(metrics, 'average_best_hits'):.4f}")
+        print(f"- 포트폴리오 수익률(ROI): {portfolio_value(metrics, 'roi'):.6f}")
     else:
         for threshold in thresholds[:3]:
-            print(f"- hit_rate_{threshold}: {hit_rate(metrics, threshold):.4f}")
+            print(f"- 상위 {threshold}개 적중률: {hit_rate(metrics, threshold):.4f}")
 
 
 def print_model_summary(payloads: list[dict], thresholds: list[int]) -> None:
@@ -149,15 +149,15 @@ def print_model_summary(payloads: list[dict], thresholds: list[int]) -> None:
 
     ranked.sort(key=lambda item: item[2], reverse=True)
     best_name, best_metrics, best_score = ranked[0]
-    print("Best Model")
-    print(f"- model: {best_name}")
-    print(f"- score: {best_score:.4f}")
-    print(f"- average_hits: {metric_value(best_metrics, 'average_hits'):.4f}")
-    print(f"- mrr: {metric_value(best_metrics, 'mrr'):.4f}")
+    print("최고 성능 모델")
+    print(f"- 모델: {best_name}")
+    print(f"- 점수: {best_score:.4f}")
+    print(f"- 평균 적중 수: {metric_value(best_metrics, 'average_hits'):.4f}")
+    print(f"- MRR: {metric_value(best_metrics, 'mrr'):.4f}")
     if "portfolio" in best_metrics:
-        print(f"- portfolio_best_hits: {portfolio_value(best_metrics, 'average_best_hits'):.4f}")
-        print(f"- portfolio_profit: {portfolio_value(best_metrics, 'expected_profit'):.2f}")
-        print(f"- portfolio_roi: {portfolio_value(best_metrics, 'roi'):.6f}")
+        print(f"- 포트폴리오 최고 적중 수: {portfolio_value(best_metrics, 'average_best_hits'):.4f}")
+        print(f"- 포트폴리오 기대 수익: {portfolio_value(best_metrics, 'expected_profit'):.2f}")
+        print(f"- 포트폴리오 수익률(ROI): {portfolio_value(best_metrics, 'roi'):.6f}")
 
 
 def print_rolling_summary(payload: dict | None) -> None:
@@ -195,13 +195,13 @@ def print_rolling_summary(payload: dict | None) -> None:
     if not ranked:
         return
     model_name, metrics = ranked[0]
-    print("Rolling Validation")
-    print(f"- winner: {model_name}")
-    print(f"- average_hits_mean: {metrics['average_hits']['mean']:.4f}")
+    print("롤링 검증")
+    print(f"- 우승 모델: {model_name}")
+    print(f"- 평균 적중 수 평균: {metrics['average_hits']['mean']:.4f}")
     portfolio = metrics.get("portfolio", {})
     if portfolio:
-        print(f"- portfolio_best_hits_mean: {portfolio['average_best_hits']['mean']:.4f}")
-        print(f"- portfolio_roi_mean: {portfolio['roi']['mean']:.6f}")
+        print(f"- 포트폴리오 최고 적중 수 평균: {portfolio['average_best_hits']['mean']:.4f}")
+        print(f"- 포트폴리오 수익률(ROI) 평균: {portfolio['roi']['mean']:.6f}")
 
 
 def print_predictions_summary(payload: dict | None, ticket_limit: int) -> None:
@@ -210,25 +210,25 @@ def print_predictions_summary(payload: dict | None, ticket_limit: int) -> None:
     recommendations = payload.get("recommendations", [])
     portfolio = payload.get("portfolio", [])
     portfolio_summary = payload.get("portfolio_summary", {})
-    print("Next Draw Prediction")
-    print(f"- latest_draw: {payload.get('latest_draw', '')}")
-    print(f"- predicted_draw: {payload.get('predicted_draw', '')}")
+    print("다음 회차 예측")
+    print(f"- 최신 회차: {payload.get('latest_draw', '')}")
+    print(f"- 예측 대상 회차: {payload.get('predicted_draw', '')}")
     print(
-        "- top_numbers: "
+        "- 상위 번호: "
         + ", ".join(str(item["number"]) for item in recommendations[: payload.get("top_k", 6)])
     )
     if portfolio_summary:
         print(
-            f"- portfolio_unique_numbers: "
+            f"- 포트폴리오 고유 번호 수: "
             f"{portfolio_summary.get('unique_number_count', 0)}"
         )
         print(
-            f"- portfolio_avg_overlap: "
+            f"- 포트폴리오 평균 중복도: "
             f"{float(portfolio_summary.get('average_pairwise_overlap', 0.0)):.4f}"
         )
     for candidate in portfolio[: max(0, ticket_limit)]:
         numbers = ", ".join(str(number) for number in candidate.get("numbers", []))
-        print(f"- ticket_{candidate.get('ticket_rank', '?')}: {numbers}")
+        print(f"- 티켓 {candidate.get('ticket_rank', '?')}: {numbers}")
 
 
 def main() -> int:

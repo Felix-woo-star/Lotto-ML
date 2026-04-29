@@ -757,6 +757,34 @@ def build_fetch_fn(args: argparse.Namespace):
     return context, lambda draw_no: fetcher.fetch_draw(draw_no, args.max_retries)
 
 
+def build_fallback_fetch_fn(args: argparse.Namespace):
+    """기본 엔진 실패 시 사용할 보조 fetch 함수를 반환한다."""
+    if args.engine == "playwright":
+        return lambda draw_no: fetch_draw_via_urllib(
+            draw_no, args.timeout, args.max_retries
+        )
+    return None
+
+
+def fetch_with_fallback(draw_no: int, primary_fetch_fn, fallback_fetch_fn=None):
+    """기본 엔진 실패 시 보조 엔진으로 한 번 더 조회한다."""
+    try:
+        return primary_fetch_fn(draw_no)
+    except RuntimeError as primary_err:
+        if fallback_fetch_fn is None:
+            raise
+        print(
+            f"Warning: primary fetch failed for draw {draw_no}; "
+            f"retrying with urllib fallback: {primary_err}"
+        )
+        try:
+            return fallback_fetch_fn(draw_no)
+        except RuntimeError as fallback_err:
+            raise RuntimeError(
+                f"{primary_err}; urllib fallback also failed: {fallback_err}"
+            ) from fallback_err
+
+
 def main() -> int:
     """CLI 실행 진입점."""
     args = parse_args()
@@ -776,8 +804,10 @@ def main() -> int:
     os.makedirs(os.path.dirname(args.out_raw) or ".", exist_ok=True)
     fetch_context = None
     fetch_fn = None
+    fallback_fetch_fn = None
     fetched = 0
     updated_existing = 0
+    failed_backfills = 0
     rows_by_draw = {
         draw_no: {field: row.get(field, "") for field in OUTPUT_FIELDS}
         for draw_no, row in existing_rows.items()
@@ -791,19 +821,23 @@ def main() -> int:
 
     try:
         fetch_context, fetch_fn = build_fetch_fn(args)
-        for draw_no in backfill_draws:
+        fallback_fetch_fn = build_fallback_fetch_fn(args)
+        if backfill_draws:
+            print(
+                f"Backfilling prize details for {len(backfill_draws)} existing draws."
+            )
+        for index, draw_no in enumerate(backfill_draws, start=1):
+            if index == 1 or index == len(backfill_draws) or index % 25 == 0:
+                print(f"Backfill progress: {index}/{len(backfill_draws)} (draw {draw_no})")
             try:
-                data = fetch_fn(draw_no)
+                data = fetch_with_fallback(draw_no, fetch_fn, fallback_fetch_fn)
             except RuntimeError as err:
                 if is_soft_no_data_error(err):
                     data = None
                 else:
                     print(f"Warning: prize backfill failed for draw {draw_no}: {err}")
-                    print(
-                        "Stopping safely without rewriting rows. "
-                        "Check network/WAF and try again."
-                    )
-                    return 1
+                    failed_backfills += 1
+                    continue
             if data is None:
                 continue
             rows_by_draw[draw_no] = normalize_record(data)
@@ -821,7 +855,7 @@ def main() -> int:
                 continue
 
             try:
-                data = fetch_fn(draw_no)
+                data = fetch_with_fallback(draw_no, fetch_fn, fallback_fetch_fn)
             except RuntimeError as err:
                 if is_soft_no_data_error(err):
                     data = None
@@ -835,7 +869,12 @@ def main() -> int:
             if data is None:
                 if args.end is None:
                     if draw_no > 1:
-                        known = fetch_fn(draw_no - 1)
+                        try:
+                            known = fetch_with_fallback(
+                                draw_no - 1, fetch_fn, fallback_fetch_fn
+                            )
+                        except RuntimeError:
+                            known = None
                         if known is None:
                             print(
                                 "Warning: data source validation failed. "
@@ -872,6 +911,11 @@ def main() -> int:
         f"Fetched {fetched} new draws into {args.out_raw}. "
         f"Backfilled {updated_existing} existing draws."
     )
+    if failed_backfills:
+        print(
+            f"Skipped {failed_backfills} backfill draws due to repeated fetch errors. "
+            "You can retry later with `--fetch-engine urllib` if needed."
+        )
     return 0
 
 

@@ -111,7 +111,7 @@ def main() -> int:
     """CLI 실행 진입점."""
     args = parse_args()
     if not os.path.exists(args.features_parquet):
-        print(f"Missing features file: {args.features_parquet}")
+        print(f"피처 파일이 없습니다: {args.features_parquet}")
         return 1
 
     model_paths = []
@@ -123,11 +123,11 @@ def main() -> int:
         model_paths.append(args.model_path)
     model_paths = list(dict.fromkeys(model_paths))
     if not model_paths:
-        print("No model paths provided.")
+        print("모델 경로가 제공되지 않았습니다.")
         return 1
     for path in model_paths:
         if not os.path.exists(path):
-            print(f"Missing model file: {path}")
+            print(f"모델 파일이 없습니다: {path}")
             return 1
 
     df = pd.read_parquet(args.features_parquet)
@@ -142,7 +142,7 @@ def main() -> int:
         with open(path, "rb") as handle:
             model = pickle.load(handle)
         if not hasattr(model, "predict_proba"):
-            print(f"Model does not support predict_proba: {path}")
+            print(f"predict_proba를 지원하지 않는 모델입니다: {path}")
             return 1
         model_proba = model.predict_proba(latest_slice[feature_cols])[:, 1]
         if probas is None:
@@ -151,7 +151,7 @@ def main() -> int:
             probas += model_proba
 
     if probas is None:
-        print("Could not calculate probabilities.")
+        print("확률을 계산할 수 없습니다.")
         return 1
     probas = probas / len(model_paths)
     latest_slice["proba"] = probas
@@ -176,17 +176,17 @@ def main() -> int:
     portfolio = portfolio_bundle["portfolio"]
     portfolio_summary = portfolio_bundle["summary"]
 
-    print(f"Latest draw: {latest_draw}")
-    print(f"Predicted draw: {next_draw}")
-    print(f"Top-{args.top_k} numbers: {top_numbers}")
-    print(f"Generated candidates: {len(portfolio_bundle['candidates'])}")
-    print(f"Portfolio size: {len(portfolio)}")
+    print(f"최신 회차: {latest_draw}")
+    print(f"예측 대상 회차: {next_draw}")
+    print(f"상위 {args.top_k}개 번호: {top_numbers}")
+    print(f"생성된 후보 조합 수: {len(portfolio_bundle['candidates'])}")
+    print(f"포트폴리오 크기: {len(portfolio)}")
     print(
-        f"Portfolio unique numbers: {portfolio_summary['unique_number_count']} "
-        f"(avg overlap {portfolio_summary['average_pairwise_overlap']:.4f})"
+        f"포트폴리오 고유 번호 수: {portfolio_summary['unique_number_count']} "
+        f"(평균 중복도 {portfolio_summary['average_pairwise_overlap']:.4f})"
     )
     if len(model_paths) > 1:
-        print(f"Ensemble models: {len(model_paths)}")
+        print(f"앙상블 모델 수: {len(model_paths)}")
 
     if args.out_json or args.out_csv or args.out_portfolio_csv:
         ranked = ranked.reset_index(drop=True)
@@ -262,7 +262,7 @@ def main() -> int:
         }
         with open(args.out_json, "w", encoding="utf-8") as handle:
             json.dump(to_json_compatible(payload), handle, ensure_ascii=False, indent=2)
-        print(f"Saved JSON predictions to {args.out_json}")
+        print(f"JSON 예측 결과를 저장했습니다: {args.out_json}")
 
     if args.out_csv:
         os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)
@@ -277,12 +277,12 @@ def main() -> int:
                 "model_count",
             ]
         ].to_csv(args.out_csv, index=False)
-        print(f"Saved CSV predictions to {args.out_csv}")
+        print(f"CSV 예측 결과를 저장했습니다: {args.out_csv}")
 
     if args.out_portfolio_csv:
         os.makedirs(os.path.dirname(args.out_portfolio_csv) or ".", exist_ok=True)
         pd.DataFrame(portfolio_rows).to_csv(args.out_portfolio_csv, index=False)
-        print(f"Saved portfolio CSV to {args.out_portfolio_csv}")
+        print(f"포트폴리오 CSV를 저장했습니다: {args.out_portfolio_csv}")
     return 0
 
 

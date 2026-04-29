@@ -517,31 +517,31 @@ def main() -> int:
         },
     }
 
-    print("Baseline metrics")
-    print(f"- average_hits: {baseline['average_hits']:.4f}")
+    print("베이스라인 지표")
+    print(f"- 평균 적중 수: {baseline['average_hits']:.4f}")
     for threshold in thresholds:
-        print(f"- hit_rate_{threshold}: {baseline['hit_rates'][threshold]:.4f}")
+        print(f"- 상위 {threshold}개 적중률: {baseline['hit_rates'][threshold]:.4f}")
     if "portfolio" in baseline:
-        print(f"- expected_profit: {baseline['portfolio']['expected_profit']:.2f}")
-        print(f"- roi: {baseline['portfolio']['roi']:.6f}")
+        print(f"- 기대 수익: {baseline['portfolio']['expected_profit']:.2f}")
+        print(f"- 수익률(ROI): {baseline['portfolio']['roi']:.6f}")
 
-    print("Random baseline")
-    print(f"- average_hits: {random_baseline['average_hits']:.4f}")
+    print("랜덤 베이스라인")
+    print(f"- 평균 적중 수: {random_baseline['average_hits']:.4f}")
     for threshold in thresholds:
-        print(f"- hit_rate_{threshold}: {random_baseline['hit_rates'][threshold]:.4f}")
+        print(f"- 상위 {threshold}개 적중률: {random_baseline['hit_rates'][threshold]:.4f}")
     if "portfolio" in random_baseline:
-        print(f"- expected_profit: {random_baseline['portfolio']['expected_profit']:.2f}")
-        print(f"- roi: {random_baseline['portfolio']['roi']:.6f}")
+        print(f"- 기대 수익: {random_baseline['portfolio']['expected_profit']:.2f}")
+        print(f"- 수익률(ROI): {random_baseline['portfolio']['roi']:.6f}")
 
-    print("Improvement vs random")
+    print("랜덤 대비 개선폭")
     print(
-        f"- average_hits: {improvement(baseline['average_hits'], random_baseline['average_hits']):.4f}"
+        f"- 평균 적중 수: {improvement(baseline['average_hits'], random_baseline['average_hits']):.4f}"
     )
     for threshold in thresholds:
         baseline_rate = baseline["hit_rates"][threshold]
         random_rate = random_baseline["hit_rates"][threshold]
         print(
-            f"- hit_rate_{threshold}: {improvement(baseline_rate, random_rate):.4f}"
+            f"- 상위 {threshold}개 적중률: {improvement(baseline_rate, random_rate):.4f}"
         )
 
     config = build_config(args, thresholds, train, test)
@@ -555,7 +555,7 @@ def main() -> int:
             },
         }
         write_json(args.out_json, payload)
-        print(f"Saved JSON metrics to {args.out_json}")
+        print(f"JSON 지표를 저장했습니다: {args.out_json}")
 
     if args.out_csv:
         base_fields = ["metric_type", "average_hits"] + [
@@ -576,7 +576,7 @@ def main() -> int:
             rows.append(row)
 
         write_csv(args.out_csv, rows, fieldnames)
-        print(f"Saved CSV metrics to {args.out_csv}")
+        print(f"CSV 지표를 저장했습니다: {args.out_csv}")
     return 0
 
 

@@ -493,10 +493,10 @@ def main() -> int:
     """CLI 실행 진입점."""
     args = parse_args()
     if not os.path.exists(args.in_parquet):
-        print(f"Missing input file: {args.in_parquet}")
+        print(f"입력 파일이 없습니다: {args.in_parquet}")
         return 1
     if args.portfolio_size > 0 and not os.path.exists(args.in_processed):
-        print(f"Missing processed draw file: {args.in_processed}")
+        print(f"정제 데이터 파일이 없습니다: {args.in_processed}")
         return 1
 
     models = parse_models(args.models)

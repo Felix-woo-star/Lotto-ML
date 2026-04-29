@@ -449,7 +449,7 @@ def main() -> int:
     """CLI 실행 진입점."""
     args = parse_args()
     if not os.path.exists(args.in_parquet):
-        print(f"Missing input file: {args.in_parquet}")
+        print(f"입력 파일이 없습니다: {args.in_parquet}")
         return 1
 
     thresholds = parse_thresholds(args.hit_thresholds)
@@ -501,11 +501,11 @@ def main() -> int:
         trials.append(result)
         print(
             f"[{idx}/{len(combos)}] "
-            f"score={result['score']:.4f}, "
-            f"avg_hits={result['metrics']['average_hits']:.4f}, "
-            f"portfolio_hit@{args.target_threshold}="
+            f"점수={result['score']:.4f}, "
+            f"평균 적중 수={result['metrics']['average_hits']:.4f}, "
+            f"포트폴리오 상위 {args.target_threshold}개 적중률="
             f"{float(result['metrics'].get('portfolio', {}).get('best_hit_rates', {}).get(args.target_threshold, 0.0)):.4f}, "
-            f"params={result['params']}"
+            f"파라미터={result['params']}"
         )
 
     trials.sort(

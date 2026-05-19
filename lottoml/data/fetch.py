@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import time
 import urllib.request
+from typing import Callable
 
 from .types import Draw
 
@@ -49,7 +50,7 @@ def backfill_range(
     *,
     sleep_seconds: float = 0.2,
     timeout: float = DEFAULT_TIMEOUT,
-    on_progress: callable | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> list[Draw]:
     """[start, end] 범위 회차를 순회. 실패한 회차는 건너뛴다."""
     draws: list[Draw] = []

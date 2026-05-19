@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from lottoml.data.fetch import fetch_draw_urllib, FetchError
+from lottoml.data.fetch import fetch_draw_urllib, FetchError, backfill_range
 from lottoml.data.types import Draw
 
 
@@ -58,11 +58,6 @@ def test_fetch_draw_urllib_raises_on_fail(monkeypatch) -> None:
 
     with pytest.raises(FetchError):
         fetch_draw_urllib(99999)
-
-
-from unittest.mock import MagicMock
-
-from lottoml.data.fetch import backfill_range
 
 
 def test_backfill_range_calls_each_draw(monkeypatch) -> None:

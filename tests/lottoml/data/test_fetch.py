@@ -2,7 +2,6 @@ import datetime as dt
 import json
 
 import pytest
-from pytest_httpx import HTTPXMock
 
 from lottoml.data.fetch import fetch_draw_urllib, FetchError
 from lottoml.data.types import Draw

@@ -3,7 +3,12 @@ import json
 
 import pytest
 
-from lottoml.data.fetch import fetch_draw_urllib, FetchError, backfill_range
+from lottoml.data.fetch import (
+    backfill_range,
+    discover_latest_draw,
+    fetch_draw_urllib,
+    FetchError,
+)
 from lottoml.data.types import Draw
 
 
@@ -100,29 +105,31 @@ def test_backfill_range_skips_failed_draws(monkeypatch) -> None:
     assert [d.draw_no for d in draws] == [5, 7]
 
 
-def test_discover_latest_draw_finds_last_responding(monkeypatch) -> None:
-    from lottoml.data.fetch import discover_latest_draw
+def test_discover_latest_draw_finds_highest_responding(monkeypatch) -> None:
+    """fetch_draw_urllib이 draw_no <= 250까지만 성공하면 250을 반환."""
 
     def fake_fetch(draw_no: int, *, timeout: float = 10.0) -> Draw:
-        if draw_no <= 1234:
-            return Draw(
-                draw_no=draw_no, draw_date=dt.date(2026, 1, 1),
-                numbers=(1, 2, 3, 4, 5, 6), bonus=7,
-                total_sales=0, first_prize=0, first_winners=0,
-                second_prize=0, second_winners=0,
-                third_prize=0, third_winners=0,
-            )
-        raise FetchError("nope")
+        if draw_no > 250:
+            raise FetchError(f"회차 {draw_no} 응답 실패")
+        return Draw(
+            draw_no=draw_no,
+            draw_date=dt.date(2026, 1, 1),
+            numbers=(1, 2, 3, 4, 5, 6),
+            bonus=7,
+            total_sales=0, first_prize=0, first_winners=0,
+            second_prize=0, second_winners=0,
+            third_prize=0, third_winners=0,
+        )
 
     monkeypatch.setattr("lottoml.data.fetch.fetch_draw_urllib", fake_fetch)
-    assert discover_latest_draw(probe_step=16) == 1234
+    assert discover_latest_draw(probe_step=4) == 250
 
 
-def test_discover_latest_draw_raises_when_api_down(monkeypatch) -> None:
-    from lottoml.data.fetch import discover_latest_draw
+def test_discover_latest_draw_raises_when_draw_one_fails(monkeypatch) -> None:
+    """draw 1 자체가 실패하면 FetchError를 raise한다."""
 
     def fake_fetch(draw_no: int, *, timeout: float = 10.0) -> Draw:
-        raise FetchError("api down")
+        raise FetchError("API down")
 
     monkeypatch.setattr("lottoml.data.fetch.fetch_draw_urllib", fake_fetch)
     with pytest.raises(FetchError):

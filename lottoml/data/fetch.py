@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import time
 import urllib.request
 
 from .types import Draw
@@ -40,3 +41,49 @@ def fetch_draw_urllib(draw_no: int, *, timeout: float = DEFAULT_TIMEOUT) -> Draw
         third_prize=0,
         third_winners=0,
     )
+
+
+def backfill_range(
+    start: int,
+    end: int,
+    *,
+    sleep_seconds: float = 0.2,
+    timeout: float = DEFAULT_TIMEOUT,
+    on_progress: callable | None = None,
+) -> list[Draw]:
+    """[start, end] 범위 회차를 순회. 실패한 회차는 건너뛴다."""
+    draws: list[Draw] = []
+    for draw_no in range(start, end + 1):
+        try:
+            draws.append(fetch_draw_urllib(draw_no, timeout=timeout))
+        except FetchError:
+            continue
+        except Exception:  # noqa: BLE001  - 네트워크 일시 오류도 동일하게 건너뜀
+            continue
+        if on_progress is not None:
+            on_progress(draw_no, end)
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+    return draws
+
+
+def discover_latest_draw(*, timeout: float = DEFAULT_TIMEOUT, probe_step: int = 64) -> int:
+    """현재 시점에서 응답하는 가장 큰 회차 번호를 이분 탐색으로 찾는다."""
+    low = 1
+    high = max(1, low + probe_step)
+    while True:
+        try:
+            fetch_draw_urllib(high, timeout=timeout)
+            low = high
+            high = high * 2
+        except FetchError:
+            break
+    # 이제 응답 회차는 low 이하, high 이상에는 없음
+    while low + 1 < high:
+        mid = (low + high) // 2
+        try:
+            fetch_draw_urllib(mid, timeout=timeout)
+            low = mid
+        except FetchError:
+            high = mid
+    return low

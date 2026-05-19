@@ -58,3 +58,48 @@ def test_fetch_draw_urllib_raises_on_fail(monkeypatch) -> None:
 
     with pytest.raises(FetchError):
         fetch_draw_urllib(99999)
+
+
+from unittest.mock import MagicMock
+
+from lottoml.data.fetch import backfill_range
+
+
+def test_backfill_range_calls_each_draw(monkeypatch) -> None:
+    calls: list[int] = []
+
+    def fake_fetch(draw_no: int, *, timeout: float = 10.0) -> Draw:
+        calls.append(draw_no)
+        return Draw(
+            draw_no=draw_no,
+            draw_date=dt.date(2026, 1, 1),
+            numbers=(1, 2, 3, 4, 5, 6),
+            bonus=7,
+            total_sales=0, first_prize=0, first_winners=0,
+            second_prize=0, second_winners=0,
+            third_prize=0, third_winners=0,
+        )
+
+    monkeypatch.setattr("lottoml.data.fetch.fetch_draw_urllib", fake_fetch)
+    draws = backfill_range(start=5, end=8, sleep_seconds=0.0)
+    assert calls == [5, 6, 7, 8]
+    assert [d.draw_no for d in draws] == [5, 6, 7, 8]
+
+
+def test_backfill_range_skips_failed_draws(monkeypatch) -> None:
+    def fake_fetch(draw_no: int, *, timeout: float = 10.0) -> Draw:
+        if draw_no == 6:
+            raise FetchError("nope")
+        return Draw(
+            draw_no=draw_no,
+            draw_date=dt.date(2026, 1, 1),
+            numbers=(1, 2, 3, 4, 5, 6),
+            bonus=7,
+            total_sales=0, first_prize=0, first_winners=0,
+            second_prize=0, second_winners=0,
+            third_prize=0, third_winners=0,
+        )
+
+    monkeypatch.setattr("lottoml.data.fetch.fetch_draw_urllib", fake_fetch)
+    draws = backfill_range(start=5, end=7, sleep_seconds=0.0)
+    assert [d.draw_no for d in draws] == [5, 7]

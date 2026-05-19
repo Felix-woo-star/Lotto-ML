@@ -98,3 +98,32 @@ def test_backfill_range_skips_failed_draws(monkeypatch) -> None:
     monkeypatch.setattr("lottoml.data.fetch.fetch_draw_urllib", fake_fetch)
     draws = backfill_range(start=5, end=7, sleep_seconds=0.0)
     assert [d.draw_no for d in draws] == [5, 7]
+
+
+def test_discover_latest_draw_finds_last_responding(monkeypatch) -> None:
+    from lottoml.data.fetch import discover_latest_draw
+
+    def fake_fetch(draw_no: int, *, timeout: float = 10.0) -> Draw:
+        if draw_no <= 1234:
+            return Draw(
+                draw_no=draw_no, draw_date=dt.date(2026, 1, 1),
+                numbers=(1, 2, 3, 4, 5, 6), bonus=7,
+                total_sales=0, first_prize=0, first_winners=0,
+                second_prize=0, second_winners=0,
+                third_prize=0, third_winners=0,
+            )
+        raise FetchError("nope")
+
+    monkeypatch.setattr("lottoml.data.fetch.fetch_draw_urllib", fake_fetch)
+    assert discover_latest_draw(probe_step=16) == 1234
+
+
+def test_discover_latest_draw_raises_when_api_down(monkeypatch) -> None:
+    from lottoml.data.fetch import discover_latest_draw
+
+    def fake_fetch(draw_no: int, *, timeout: float = 10.0) -> Draw:
+        raise FetchError("api down")
+
+    monkeypatch.setattr("lottoml.data.fetch.fetch_draw_urllib", fake_fetch)
+    with pytest.raises(FetchError):
+        discover_latest_draw()

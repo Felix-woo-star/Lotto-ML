@@ -69,9 +69,15 @@ def backfill_range(
 
 
 def discover_latest_draw(*, timeout: float = DEFAULT_TIMEOUT, probe_step: int = 64) -> int:
-    """현재 시점에서 응답하는 가장 큰 회차 번호를 이분 탐색으로 찾는다."""
+    """현재 시점에서 응답하는 가장 큰 회차 번호를 이분 탐색으로 찾는다.
+
+    Raises:
+        FetchError: 1회차마저 응답하지 않을 때 (API 전체 장애).
+    """
+    # 먼저 1회차를 확인해 API 자체가 살아있는지 본다
+    fetch_draw_urllib(1, timeout=timeout)
     low = 1
-    high = max(1, low + probe_step)
+    high = max(2, low + probe_step)
     while True:
         try:
             fetch_draw_urllib(high, timeout=timeout)
@@ -79,7 +85,6 @@ def discover_latest_draw(*, timeout: float = DEFAULT_TIMEOUT, probe_step: int = 
             high = high * 2
         except FetchError:
             break
-    # 이제 응답 회차는 low 이하, high 이상에는 없음
     while low + 1 < high:
         mid = (low + high) // 2
         try:

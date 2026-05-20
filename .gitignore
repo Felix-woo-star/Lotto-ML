@@ -2,6 +2,7 @@
 .DS_Store
 .idea/
 .vscode/
+.claude/
 
 # Python cache / build
 __pycache__/
@@ -35,6 +36,9 @@ data/raw/*.csv
 data/processed/*.csv
 data/features/*.parquet
 data/features/*.json
+data/draws.csv
+data/portfolio.csv
+data/models/
 
 # Keep folder placeholders
 !data/raw/.gitkeep

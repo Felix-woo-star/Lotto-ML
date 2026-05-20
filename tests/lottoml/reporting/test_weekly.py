@@ -39,3 +39,25 @@ def test_render_weekly_markdown_has_result_placeholder() -> None:
         portfolio=_fake_portfolio(), probs=probs, pool=list(range(1, 31)),
     )
     assert "**당첨번호**: TBD" in md
+
+
+from lottoml.reporting.weekly import render_weekly_results_section
+
+
+def test_render_results_section_with_completed_draw() -> None:
+    section = render_weekly_results_section(
+        winning=(5, 11, 17, 26, 32, 39),
+        bonus=20,
+        per_ticket=[
+            {"idx": 1, "source": "covering", "numbers": (5, 11, 17, 23, 32, 39), "hits": 5, "tier": 3, "payout": 1_500_000},
+            {"idx": 2, "source": "covering", "numbers": (1, 2, 3, 4, 5, 6), "hits": 1, "tier": None, "payout": 0},
+        ],
+        total_payout=1_500_000,
+        ticket_price=1_000,
+    )
+    assert "5 11 17 26 32 39" in section
+    assert "보너스 20" in section
+    assert "1번" in section
+    assert "5개 적중" in section
+    assert "1,500,000원" in section
+    assert "회차 손익" in section

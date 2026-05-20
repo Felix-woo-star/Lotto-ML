@@ -39,3 +39,47 @@ def render_weekly_markdown(
     out.write("- **환급**: TBD원\n")
 
     return out.getvalue()
+
+
+def render_weekly_results_section(
+    *,
+    winning: tuple[int, ...],
+    bonus: int,
+    per_ticket: list[dict],
+    total_payout: int,
+    ticket_price: int = 1_000,
+) -> str:
+    """추첨 결과로 채운 결과 섹션 markdown."""
+    out = StringIO()
+    out.write("## 결과\n\n")
+    out.write(f"- **당첨번호**: {' '.join(str(n) for n in winning)} (보너스 {bonus})\n\n")
+    out.write("| 티켓 | 번호 | 적중 | 등수 | 환급 |\n")
+    out.write("|------|------|------|------|------|\n")
+    best_hits = 0
+    for row in per_ticket:
+        nums = " ".join(str(n) for n in row["numbers"])
+        tier_str = f"{row['tier']}등" if row["tier"] else "-"
+        hit_str = f"{row['hits']}개 적중"
+        payout_str = f"{row['payout']:,}원"
+        out.write(f"| {row['idx']}번 ({row['source']}) | {nums} | {hit_str} | {tier_str} | {payout_str} |\n")
+        best_hits = max(best_hits, row["hits"])
+    total_cost = len(per_ticket) * ticket_price
+    profit = total_payout - total_cost
+    out.write(f"\n- **포트폴리오 best hits**: {best_hits}개\n")
+    out.write(f"- **회차 손익**: {profit:+,}원 (지출 {total_cost:,} / 환급 {total_payout:,})\n")
+    return out.getvalue()
+
+
+def update_weekly_markdown_with_results(
+    path, section_markdown: str, *, draw_date: str | None = None
+) -> None:
+    """기존 weekly.md의 '## 결과' 섹션을 새 결과로 교체한다."""
+    text = path.read_text(encoding="utf-8")
+    if draw_date is not None:
+        text = text.replace("(TBD 추첨)", f"({draw_date} 추첨)", 1)
+    marker = "\n## 결과"
+    idx = text.find(marker)
+    if idx == -1:
+        path.write_text(text.rstrip() + "\n\n" + section_markdown, encoding="utf-8")
+        return
+    path.write_text(text[:idx].rstrip() + "\n\n" + section_markdown, encoding="utf-8")

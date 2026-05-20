@@ -190,17 +190,44 @@ def recommend(root: Path, pool_size: int, time_limit: float) -> None:
                 hits=hits, tier=tier, payout=payout,
                 recorded_at=dt.datetime.now(),
             )
-            scored_draws.setdefault(draw.draw_no, []).append((record, hits, tier, payout))
+            scored_draws.setdefault(draw.draw_no, []).append(
+                {
+                    "idx": record.ticket_idx,
+                    "source": record.source,
+                    "numbers": record.numbers,
+                    "hits": hits,
+                    "tier": tier,
+                    "payout": payout,
+                }
+            )
+        from .reporting.weekly import (
+            render_weekly_results_section,
+            update_weekly_markdown_with_results,
+        )
+
         for draw_no, rows in scored_draws.items():
             d = draws_by_no[draw_no]
             click.echo(f"   {draw_no}회 당첨번호: {' '.join(str(n) for n in d.numbers)} (보너스 {d.bonus})")
             total_payout = 0
-            for record, hits, tier, payout in rows:
-                nums = " ".join(str(n) for n in record.numbers)
-                tag = f"{tier}등" if tier else f"{hits}개 적중"
-                click.echo(f"   {record.ticket_idx}번 ({record.source}): {nums} → {tag} ({payout:,}원)")
-                total_payout += payout
+            for row in rows:
+                nums = " ".join(str(n) for n in row["numbers"])
+                tag = f"{row['tier']}등" if row["tier"] else f"{row['hits']}개 적중"
+                click.echo(f"   {row['idx']}번 ({row['source']}): {nums} → {tag} ({row['payout']:,}원)")
+                total_payout += row["payout"]
             click.echo(f"   회차 손익: {total_payout - 5000:+,}원")
+
+            md_path = weekly_dir / f"{draw_no}.md"
+            if md_path.exists():
+                section = render_weekly_results_section(
+                    winning=d.numbers,
+                    bonus=d.bonus,
+                    per_ticket=rows,
+                    total_payout=total_payout,
+                )
+                update_weekly_markdown_with_results(
+                    md_path, section, draw_date=d.draw_date.isoformat()
+                )
+                click.echo(f"   📝 {md_path.relative_to(root)} 결과 갱신됨")
 
     # 다음 회차 추천
     next_draw = existing[-1].draw_no + 1

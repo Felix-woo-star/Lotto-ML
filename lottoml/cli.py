@@ -18,6 +18,7 @@ from .data.portfolio import (
 from .data.storage import load_draws, save_draws
 from .model.predict import predict_probabilities
 from .model.train import train_ranker
+from .reporting.history import render_history_markdown
 from .reporting.scoring import classify, score_ticket
 from .reporting.weekly import render_weekly_markdown
 from .selection.hybrid import build_portfolio
@@ -243,6 +244,67 @@ def recommend(root: Path, pool_size: int, time_limit: float) -> None:
                 recommended_at=now,
             ),
         )
+
+
+@main.command()
+@click.option(
+    "--root",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path.cwd(),
+    show_default=True,
+)
+def report(root: Path) -> None:
+    """누적 통계 markdown 생성."""
+    portfolio_path = root / "data" / "portfolio.csv"
+    out_path = root / "reports" / "history.md"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    records = load_portfolio_records(portfolio_path) if portfolio_path.exists() else []
+    md = render_history_markdown(records)
+    out_path.write_text(md, encoding="utf-8")
+    click.echo(md)
+    click.echo(f"\n📝 {out_path.relative_to(root)} 저장됨")
+
+
+@main.command()
+@click.option(
+    "--root",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path.cwd(),
+    show_default=True,
+)
+def status(root: Path) -> None:
+    """데이터 / 모델 / 추천 대기 상태."""
+    draws_path = root / "data" / "draws.csv"
+    model_meta = root / "data" / "models" / "ranker_meta.json"
+    portfolio_path = root / "data" / "portfolio.csv"
+
+    if not draws_path.exists():
+        click.echo("데이터:     없음 (`lotto setup` 필요)")
+    else:
+        draws = load_draws(draws_path)
+        click.echo(
+            f"데이터:     1~{draws[-1].draw_no}회 "
+            f"(마지막 추첨일 {draws[-1].draw_date.isoformat()})"
+        )
+
+    if not model_meta.exists():
+        click.echo("모델:       없음 (`lotto setup` 또는 `lotto retrain` 필요)")
+    else:
+        import json
+        meta = json.loads(model_meta.read_text(encoding="utf-8"))
+        train_end = meta["train_draws"][1]
+        click.echo(f"모델:       학습 회차 1~{train_end}")
+
+    if portfolio_path.exists():
+        records = load_portfolio_records(portfolio_path)
+        pending = [r for r in records if r.hits is None]
+        if pending:
+            draw_nos = sorted({r.draw_no for r in pending})
+            click.echo(f"미평가 추천: {draw_nos}")
+        else:
+            click.echo("미평가 추천: 없음")
+    else:
+        click.echo("추천 이력:  없음")
 
 
 if __name__ == "__main__":

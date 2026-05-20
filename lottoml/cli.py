@@ -1,15 +1,26 @@
 """lotto CLI entrypoint."""
 from __future__ import annotations
 
+import datetime as dt
 import sys
 from pathlib import Path
 
 import click
 
-from .data.fetch import backfill_range, discover_latest_draw
+from .data.fetch import backfill_range, discover_latest_draw, fetch_draw_urllib
 from .data.migrate import migrate_v1_csv
+from .data.portfolio import (
+    PortfolioRecord,
+    append_recommendation,
+    load_portfolio_records,
+    record_result,
+)
 from .data.storage import load_draws, save_draws
+from .model.predict import predict_probabilities
 from .model.train import train_ranker
+from .reporting.scoring import classify, score_ticket
+from .reporting.weekly import render_weekly_markdown
+from .selection.hybrid import build_portfolio
 
 
 @click.group()
@@ -115,6 +126,123 @@ def retrain(root: Path, holdout: int, yes: bool) -> None:
             click.echo("[lotto] 교체 취소됨")
             return
     click.echo(f"[lotto] 모델 저장: {out_model}")
+
+
+@main.command()
+@click.option(
+    "--root",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path.cwd(),
+    show_default=True,
+)
+@click.option("--pool-size", type=int, default=30, show_default=True)
+@click.option("--time-limit", type=float, default=30.0, show_default=True, help="ILP 시간 한계 (초)")
+def recommend(root: Path, pool_size: int, time_limit: float) -> None:
+    """매주 1회 - 최신 fetch → 채점 → 다음 회차 추천."""
+    draws_path = root / "data" / "draws.csv"
+    portfolio_path = root / "data" / "portfolio.csv"
+    model_path = root / "data" / "models" / "ranker.pkl"
+    weekly_dir = root / "reports" / "weekly"
+    weekly_dir.mkdir(parents=True, exist_ok=True)
+
+    if not draws_path.exists():
+        click.echo("[lotto] 데이터가 없습니다. `lotto setup`을 먼저 실행하세요.")
+        raise SystemExit(1)
+    if not model_path.exists():
+        click.echo("[lotto] 모델이 없습니다. `lotto setup`을 먼저 실행하세요.")
+        raise SystemExit(1)
+
+    existing = load_draws(draws_path)
+    last_known = existing[-1].draw_no
+    click.echo("[lotto] 최신 회차 확인 중...")
+    latest = discover_latest_draw()
+    if latest > last_known:
+        for draw_no in range(last_known + 1, latest + 1):
+            try:
+                new_draw = fetch_draw_urllib(draw_no)
+                existing.append(new_draw)
+                click.echo(f"        {draw_no}회 수집됨")
+            except Exception as exc:  # noqa: BLE001
+                click.echo(f"        {draw_no}회 수집 실패: {exc}")
+        save_draws(draws_path, existing)
+
+    # 채점: portfolio.csv 에서 미평가 + draws.csv 에 존재하는 회차 매칭
+    draws_by_no = {d.draw_no: d for d in existing}
+    records = load_portfolio_records(portfolio_path) if portfolio_path.exists() else []
+    pending = [r for r in records if r.hits is None and r.draw_no in draws_by_no]
+    if pending:
+        click.echo("\n📊 미평가 추천 채점")
+        scored_draws: dict[int, list] = {}
+        for record in pending:
+            draw = draws_by_no[record.draw_no]
+            hits, tier = classify(record.numbers, draw.numbers, draw.bonus)
+            actuals = {
+                "first_prize": draw.first_prize,
+                "second_prize": draw.second_prize,
+                "third_prize": draw.third_prize,
+            }
+            payout = score_ticket(tier=tier, actuals=actuals)
+            record_result(
+                portfolio_path,
+                draw_no=record.draw_no, ticket_idx=record.ticket_idx,
+                actual_numbers=draw.numbers, actual_bonus=draw.bonus,
+                hits=hits, tier=tier, payout=payout,
+                recorded_at=dt.datetime.now(),
+            )
+            scored_draws.setdefault(draw.draw_no, []).append((record, hits, tier, payout))
+        for draw_no, rows in scored_draws.items():
+            d = draws_by_no[draw_no]
+            click.echo(f"   {draw_no}회 당첨번호: {' '.join(str(n) for n in d.numbers)} (보너스 {d.bonus})")
+            total_payout = 0
+            for record, hits, tier, payout in rows:
+                nums = " ".join(str(n) for n in record.numbers)
+                tag = f"{tier}등" if tier else f"{hits}개 적중"
+                click.echo(f"   {record.ticket_idx}번 ({record.source}): {nums} → {tag} ({payout:,}원)")
+                total_payout += payout
+            click.echo(f"   회차 손익: {total_payout - 5000:+,}원")
+
+    # 다음 회차 추천
+    next_draw = existing[-1].draw_no + 1
+    probs = predict_probabilities(existing, model_path=model_path)
+    portfolio = build_portfolio(
+        probs, seed=next_draw, pool_size=pool_size, time_limit_seconds=time_limit
+    )
+    ordered = sorted(probs.items(), key=lambda kv: (-kv[1], kv[0]))
+    pool = sorted(n for n, _ in ordered[:pool_size])
+
+    click.echo(f"\n🎯 다음 회차({next_draw}) 추천")
+    for entry in portfolio.tickets:
+        nums = " ".join(str(n) for n in entry.numbers)
+        click.echo(f"   {entry.ticket_idx}번 ({entry.source}): {nums}")
+    if portfolio.covering.fallback_used:
+        click.echo("   ⚠️  ILP 시간초과로 greedy fallback 사용")
+
+    md = render_weekly_markdown(
+        draw_no=next_draw,
+        draw_date="TBD",
+        portfolio=portfolio, probs=probs, pool=pool,
+    )
+    md_path = weekly_dir / f"{next_draw}.md"
+    md_path.write_text(md, encoding="utf-8")
+    click.echo(f"\n   📝 {md_path.relative_to(root)} 저장됨")
+
+    now = dt.datetime.now()
+    existing_records = {
+        (r.draw_no, r.ticket_idx) for r in load_portfolio_records(portfolio_path)
+    }
+    for entry in portfolio.tickets:
+        if (next_draw, entry.ticket_idx) in existing_records:
+            continue
+        append_recommendation(
+            portfolio_path,
+            PortfolioRecord(
+                draw_no=next_draw,
+                ticket_idx=entry.ticket_idx,
+                numbers=entry.numbers,
+                source=entry.source,
+                recommended_at=now,
+            ),
+        )
 
 
 if __name__ == "__main__":

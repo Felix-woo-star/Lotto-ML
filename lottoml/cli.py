@@ -9,6 +9,7 @@ import click
 from .data.fetch import backfill_range, discover_latest_draw
 from .data.migrate import migrate_v1_csv
 from .data.storage import load_draws, save_draws
+from .model.train import train_ranker
 
 
 @click.group()
@@ -64,8 +65,56 @@ def setup(root: Path, skip_train: bool) -> None:
         click.echo("[lotto] 학습 단계 건너뜀 (--skip-train)")
         return
 
-    # Model training은 M2에서 구현. 지금은 안내만.
-    click.echo("[lotto] 모델 학습은 M2 단계에서 구현됩니다")
+    out_model = root / "data" / "models" / "ranker.pkl"
+    out_meta = root / "data" / "models" / "ranker_meta.json"
+    all_draws = load_draws(draws_path)
+    click.echo("[lotto] 모델 학습 중...")
+    metrics = train_ranker(all_draws, out_model=out_model, out_meta=out_meta)
+    click.echo(
+        f"        Brier: {metrics['brier']:.4f}  "
+        f"ECE: {metrics['ece']:.4f}  "
+        f"Top6: {metrics['top6_hit']:.4f}"
+    )
+    click.echo("[lotto] 준비 완료. `lotto recommend`로 시작하세요.")
+
+
+@main.command()
+@click.option(
+    "--root",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path.cwd(),
+    show_default=True,
+)
+@click.option("--holdout", type=int, default=50, show_default=True)
+@click.option("--yes", "-y", is_flag=True, help="확인 프롬프트 건너뛰기")
+def retrain(root: Path, holdout: int, yes: bool) -> None:
+    """LightGBM ranker 재학습."""
+    draws_path = root / "data" / "draws.csv"
+    if not draws_path.exists():
+        click.echo(f"[lotto] 데이터 파일이 없습니다: {draws_path}")
+        raise SystemExit(1)
+
+    draws = load_draws(draws_path)
+    if len(draws) <= 100 + holdout:
+        click.echo(f"[lotto] 학습 데이터가 부족합니다 ({len(draws)}회)")
+        raise SystemExit(1)
+
+    out_model = root / "data" / "models" / "ranker.pkl"
+    out_meta = root / "data" / "models" / "ranker_meta.json"
+
+    click.echo(f"[lotto] 학습 시작 ({len(draws)}회, holdout={holdout})")
+    metrics = train_ranker(draws, out_model=out_model, out_meta=out_meta, holdout=holdout)
+    click.echo(
+        f"        Brier: {metrics['brier']:.4f}  "
+        f"ECE: {metrics['ece']:.4f}  "
+        f"Top6: {metrics['top6_hit']:.4f}"
+    )
+
+    if not yes:
+        if not click.confirm("새 모델로 교체하시겠습니까?", default=True):
+            click.echo("[lotto] 교체 취소됨")
+            return
+    click.echo(f"[lotto] 모델 저장: {out_model}")
 
 
 if __name__ == "__main__":

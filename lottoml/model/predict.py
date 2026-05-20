@@ -18,7 +18,8 @@ def predict_probabilities(draws: Iterable[Draw], *, model_path: Path) -> dict[in
 
     latest = int(df["draw_no"].max())
     latest_slice = df[df["draw_no"] == latest].sort_values("number")
-    X = latest_slice[list(FEATURE_COLS)].to_numpy()
+    # DataFrame을 유지해 학습 때와 동일한 feature name으로 전달한다
+    X = latest_slice[list(FEATURE_COLS)]
 
     with model_path.open("rb") as handle:
         calibrator = pickle.load(handle)

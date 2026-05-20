@@ -42,9 +42,11 @@ def train_ranker(
 
     train_mask = df["draw_no"] <= cutoff
     test_mask = df["draw_no"] > cutoff
-    X_train = df.loc[train_mask, list(FEATURE_COLS)].to_numpy()
+    # DataFrame을 유지해 feature name이 학습·예측 양쪽에 보존되도록 한다
+    # (LightGBM의 "X does not have valid feature names" 경고 방지)
+    X_train = df.loc[train_mask, list(FEATURE_COLS)]
     y_train = df.loc[train_mask, "label"].to_numpy()
-    X_test = df.loc[test_mask, list(FEATURE_COLS)].to_numpy()
+    X_test = df.loc[test_mask, list(FEATURE_COLS)]
 
     weights = np.power(decay, cutoff - df.loc[train_mask, "draw_no"].to_numpy())
 

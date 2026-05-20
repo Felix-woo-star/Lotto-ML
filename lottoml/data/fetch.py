@@ -9,8 +9,18 @@ from typing import Callable
 
 from .types import Draw
 
-API_URL = "https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={draw_no}"
+# 신규 lt645 API. 구 common.do?method=getLottoNumber 엔드포인트는 2025년경
+# 폐기되어 HTML 리다이렉트로 응답한다.
+LT645_API_URL = (
+    "https://www.dhlottery.co.kr/lt645/selectPstLt645InfoNew.do"
+    "?srchDir=center&srchLtEpsd={draw_no}"
+)
 DEFAULT_TIMEOUT = 10.0
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
 
 
 class FetchError(RuntimeError):
@@ -18,30 +28,56 @@ class FetchError(RuntimeError):
 
 
 def fetch_draw_urllib(draw_no: int, *, timeout: float = DEFAULT_TIMEOUT) -> Draw:
-    """urllib 기반 단일 회차 조회. 2등/3등 금액은 응답에 없어 0으로 채움."""
-    url = API_URL.format(draw_no=draw_no)
-    with urllib.request.urlopen(url, timeout=timeout) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    if payload.get("returnValue") != "success":
-        raise FetchError(f"회차 {draw_no} 응답 실패: {payload.get('returnValue')}")
+    """urllib + lt645 API 기반 단일 회차 조회.
+
+    lt645 API는 요청한 회차를 포함한 최근 여러 회차를 리스트로 반환하므로
+    `ltEpsd == draw_no` 항목을 찾아 사용한다.
+    """
+    url = LT645_API_URL.format(draw_no=draw_no)
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": DEFAULT_USER_AGENT,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Referer": f"https://www.dhlottery.co.kr/lt645/result?ltEpsd={draw_no}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise FetchError(f"회차 {draw_no} 비정상 응답 (JSON 아님)") from exc
+
+    rows = (payload or {}).get("data", {}).get("list") or []
+    row = next((r for r in rows if int(r.get("ltEpsd", 0)) == draw_no), None)
+    if row is None:
+        raise FetchError(f"회차 {draw_no} 응답에 해당 회차가 없음")
 
     return Draw(
-        draw_no=int(payload["drwNo"]),
-        draw_date=dt.date.fromisoformat(payload["drwNoDate"]),
+        draw_no=int(row["ltEpsd"]),
+        draw_date=_parse_lt645_date(str(row["ltRflYmd"])),
         numbers=(
-            int(payload["drwtNo1"]), int(payload["drwtNo2"]),
-            int(payload["drwtNo3"]), int(payload["drwtNo4"]),
-            int(payload["drwtNo5"]), int(payload["drwtNo6"]),
+            int(row["tm1WnNo"]), int(row["tm2WnNo"]),
+            int(row["tm3WnNo"]), int(row["tm4WnNo"]),
+            int(row["tm5WnNo"]), int(row["tm6WnNo"]),
         ),
-        bonus=int(payload["bnusNo"]),
-        total_sales=int(payload.get("totSellamnt", 0)),
-        first_prize=int(payload.get("firstWinamnt", 0)),
-        first_winners=int(payload.get("firstPrzwnerCo", 0)),
-        second_prize=0,
-        second_winners=0,
-        third_prize=0,
-        third_winners=0,
+        bonus=int(row["bnsWnNo"]),
+        total_sales=int(row.get("rlvtEpsdSumNtslAmt", 0) or 0),
+        first_prize=int(row.get("rnk1WnAmt", 0) or 0),
+        first_winners=int(row.get("rnk1WnNope", 0) or 0),
+        second_prize=int(row.get("rnk2WnAmt", 0) or 0),
+        second_winners=int(row.get("rnk2WnNope", 0) or 0),
+        third_prize=int(row.get("rnk3WnAmt", 0) or 0),
+        third_winners=int(row.get("rnk3WnNope", 0) or 0),
     )
+
+
+def _parse_lt645_date(ymd: str) -> dt.date:
+    """'20260516' → date(2026, 5, 16)."""
+    if len(ymd) != 8 or not ymd.isdigit():
+        raise FetchError(f"잘못된 날짜 형식: {ymd!r}")
+    return dt.date(int(ymd[:4]), int(ymd[4:6]), int(ymd[6:8]))
 
 
 def backfill_range(

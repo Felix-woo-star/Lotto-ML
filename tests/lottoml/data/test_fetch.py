@@ -13,56 +13,64 @@ from lottoml.data.types import Draw
 
 
 SAMPLE_API_RESPONSE = {
-    "totSellamnt": 3681782000,
-    "returnValue": "success",
-    "drwNoDate": "2002-12-07",
-    "firstWinamnt": 0,
-    "drwtNo6": 40,
-    "drwtNo4": 33,
-    "firstPrzwnerCo": 0,
-    "drwtNo5": 37,
-    "bnusNo": 16,
-    "firstAccumamnt": 863604600,
-    "drwNo": 1,
-    "drwtNo2": 23,
-    "drwtNo3": 29,
-    "drwtNo1": 10,
+    "resultCode": None,
+    "resultMessage": None,
+    "data": {
+        "list": [
+            {
+                "ltEpsd": 1,
+                "ltRflYmd": "20021207",
+                "tm1WnNo": 10, "tm2WnNo": 23, "tm3WnNo": 29,
+                "tm4WnNo": 33, "tm5WnNo": 37, "tm6WnNo": 40,
+                "bnsWnNo": 16,
+                "rlvtEpsdSumNtslAmt": 3681782000,
+                "rnk1WnAmt": 0, "rnk1WnNope": 0,
+                "rnk2WnAmt": 143934100, "rnk2WnNope": 1,
+                "rnk3WnAmt": 5140500, "rnk3WnNope": 28,
+            }
+        ]
+    },
 }
+
+
+def _make_fake_urlopen(payload_bytes: bytes):
+    def fake_urlopen(request, timeout=None):
+        class _Resp:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self): return payload_bytes
+        return _Resp()
+    return fake_urlopen
 
 
 def test_fetch_draw_urllib_parses_response(monkeypatch) -> None:
     payload = json.dumps(SAMPLE_API_RESPONSE).encode()
-
-    def fake_urlopen(url, timeout):
-        class _Resp:
-            def __enter__(self): return self
-            def __exit__(self, *args): return False
-            def read(self): return payload
-        return _Resp()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("urllib.request.urlopen", _make_fake_urlopen(payload))
 
     draw = fetch_draw_urllib(1)
     assert draw.draw_no == 1
     assert draw.numbers == (10, 23, 29, 33, 37, 40)
     assert draw.bonus == 16
     assert draw.draw_date == dt.date(2002, 12, 7)
+    assert draw.second_prize == 143934100
+    assert draw.third_prize == 5140500
 
 
 def test_fetch_draw_urllib_raises_on_fail(monkeypatch) -> None:
-    payload = json.dumps({"returnValue": "fail"}).encode()
-
-    def fake_urlopen(url, timeout):
-        class _Resp:
-            def __enter__(self): return self
-            def __exit__(self, *args): return False
-            def read(self): return payload
-        return _Resp()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    payload = json.dumps({"data": {"list": []}}).encode()
+    monkeypatch.setattr("urllib.request.urlopen", _make_fake_urlopen(payload))
 
     with pytest.raises(FetchError):
         fetch_draw_urllib(99999)
+
+
+def test_fetch_draw_urllib_raises_on_non_json(monkeypatch) -> None:
+    """폐기된 엔드포인트가 HTML로 리다이렉트할 때 FetchError가 발생해야 함."""
+    monkeypatch.setattr(
+        "urllib.request.urlopen", _make_fake_urlopen(b"<html>moved</html>")
+    )
+    with pytest.raises(FetchError):
+        fetch_draw_urllib(1)
 
 
 def test_backfill_range_calls_each_draw(monkeypatch) -> None:

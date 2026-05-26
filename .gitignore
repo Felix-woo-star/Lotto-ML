@@ -30,6 +30,7 @@ models/
 reports/*.json
 reports/*.csv
 reports/*.md
+reports/weekly/
 
 # Generated data files
 data/raw/*.csv

@@ -7,7 +7,12 @@ from pathlib import Path
 
 import click
 
-from .data.fetch import backfill_range, discover_latest_draw, fetch_draw_urllib
+from .data.fetch import (
+    FetchError,
+    backfill_range,
+    discover_latest_draw,
+    fetch_draw_urllib,
+)
 from .data.migrate import migrate_v1_csv
 from .data.portfolio import (
     PortfolioRecord,
@@ -55,8 +60,16 @@ def setup(root: Path, skip_train: bool) -> None:
     last_known = existing[-1].draw_no if existing else 0
 
     click.echo("[lotto] 최신 회차 탐색 중...")
-    latest = discover_latest_draw()
-    click.echo(f"        최신 회차: {latest}")
+    try:
+        latest = discover_latest_draw()
+        click.echo(f"        최신 회차: {latest}")
+    except FetchError as exc:
+        if last_known == 0:
+            click.echo(f"[lotto] 최신 회차 확인 실패: {exc}")
+            click.echo("        시드 데이터도 없어 종료합니다. 잠시 후 다시 시도하세요.")
+            raise SystemExit(1) from exc
+        click.echo(f"        ⚠️  최신 회차 확인 실패 ({exc}). 캐시된 {last_known}회까지로 진행합니다.")
+        latest = last_known
 
     if latest > last_known:
         click.echo(f"[lotto] {last_known + 1}~{latest} 회차 수집")
@@ -156,7 +169,13 @@ def recommend(root: Path, pool_size: int, time_limit: float) -> None:
     existing = load_draws(draws_path)
     last_known = existing[-1].draw_no
     click.echo("[lotto] 최신 회차 확인 중...")
-    latest = discover_latest_draw()
+    # 네트워크 실패해도 캐시된 데이터로 추천은 계속 진행 (spec 5.6)
+    try:
+        latest = discover_latest_draw()
+    except FetchError as exc:
+        click.echo(f"        ⚠️  최신 회차 확인 실패 ({exc}). 캐시 데이터로 진행합니다.")
+        latest = last_known
+
     if latest > last_known:
         for draw_no in range(last_known + 1, latest + 1):
             try:

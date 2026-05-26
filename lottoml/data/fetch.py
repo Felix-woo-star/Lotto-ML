@@ -15,7 +15,8 @@ LT645_API_URL = (
     "https://www.dhlottery.co.kr/lt645/selectPstLt645InfoNew.do"
     "?srchDir=center&srchLtEpsd={draw_no}"
 )
-DEFAULT_TIMEOUT = 10.0
+DEFAULT_TIMEOUT = 20.0
+DEFAULT_MAX_RETRIES = 3
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -27,11 +28,19 @@ class FetchError(RuntimeError):
     """동행복권 응답이 비정상이거나 회차가 존재하지 않을 때."""
 
 
-def fetch_draw_urllib(draw_no: int, *, timeout: float = DEFAULT_TIMEOUT) -> Draw:
+def fetch_draw_urllib(
+    draw_no: int,
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+) -> Draw:
     """urllib + lt645 API 기반 단일 회차 조회.
 
     lt645 API는 요청한 회차를 포함한 최근 여러 회차를 리스트로 반환하므로
     `ltEpsd == draw_no` 항목을 찾아 사용한다.
+
+    일시적 네트워크 오류 (타임아웃, URLError 등) 는 지수 백오프로 최대
+    `max_retries` 회 재시도한다. JSON 디코드 실패는 즉시 FetchError.
     """
     url = LT645_API_URL.format(draw_no=draw_no)
     request = urllib.request.Request(
@@ -43,11 +52,24 @@ def fetch_draw_urllib(draw_no: int, *, timeout: float = DEFAULT_TIMEOUT) -> Draw
             "Referer": f"https://www.dhlottery.co.kr/lt645/result?ltEpsd={draw_no}",
         },
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except json.JSONDecodeError as exc:
-        raise FetchError(f"회차 {draw_no} 비정상 응답 (JSON 아님)") from exc
+
+    last_error: Exception | None = None
+    payload = None
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            break
+        except json.JSONDecodeError as exc:
+            raise FetchError(f"회차 {draw_no} 비정상 응답 (JSON 아님)") from exc
+        except (TimeoutError, urllib.error.URLError, OSError) as exc:
+            last_error = exc
+            if attempt < max_retries - 1:
+                time.sleep(0.5 * (2 ** attempt))  # 0.5s, 1.0s, 2.0s
+    if payload is None:
+        raise FetchError(
+            f"회차 {draw_no} 네트워크 오류 ({max_retries}회 재시도 실패): {last_error}"
+        ) from last_error
 
     rows = (payload or {}).get("data", {}).get("list") or []
     row = next((r for r in rows if int(r.get("ltEpsd", 0)) == draw_no), None)
